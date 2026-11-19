@@ -218,12 +218,14 @@ def test_estadisticas_principales_monto_aisladas_y_saldo_pendiente(conn):
     obtener_repositorio(conn, "LiquidacionEmitida").crear(
         IdProfesional=id_prof, Periodo="2026-08", MontoGenerado=10000,
     )
+    # Monto NEGATIVO: un pago real se guarda así (reduce lo que debe,
+    # ver `app.negocio.pagos.registrar_pago`), nunca en positivo.
     obtener_repositorio(conn, "HistorialPagos").crear(
-        IdProfesional=id_prof, Monto=4000, PeriodoImputado="2026-08",
+        IdProfesional=id_prof, Monto=-4000, PeriodoImputado="2026-08",
     )
     # Pago de otro período no debe afectar el saldo pendiente de agosto.
     obtener_repositorio(conn, "HistorialPagos").crear(
-        IdProfesional=id_prof, Monto=1000, PeriodoImputado="2026-07",
+        IdProfesional=id_prof, Monto=-1000, PeriodoImputado="2026-07",
     )
     principales = calcular_estadisticas_principales(conn)
     assert principales.monto_aisladas == pytest.approx(2000.0)
@@ -263,12 +265,33 @@ def test_estadisticas_principales_saldo_pendiente_no_resta_el_sobrepago_de_un_pr
     repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
     repo_liq.crear(IdProfesional=id_prof_sobrepaga, Periodo="2026-08", MontoGenerado=500)
     repo_liq.crear(IdProfesional=id_prof_debe, Periodo="2026-08", MontoGenerado=9500)
+    # Monto NEGATIVO: un pago real se guarda así (reduce lo que debe,
+    # ver `app.negocio.pagos.registrar_pago`), nunca en positivo.
     obtener_repositorio(conn, "HistorialPagos").crear(
-        IdProfesional=id_prof_sobrepaga, Monto=600, PeriodoImputado="2026-08",
+        IdProfesional=id_prof_sobrepaga, Monto=-600, PeriodoImputado="2026-08",
     )
     principales = calcular_estadisticas_principales(conn)
     assert principales.total_liquidado == pytest.approx(10000.0)
     assert principales.saldo_pendiente == pytest.approx(9500.0)
+
+
+def test_estadisticas_principales_saldo_pendiente_un_ajuste_positivo_suma_deuda_del_periodo(conn):
+    """Caso real encontrado con la base de datos de la clienta: un
+    "ajuste" (`HistorialPagos.EsAjuste`) imputado al período puede ir en
+    POSITIVO (un cargo que aumenta lo que debe, ver `app.negocio.pagos.
+    registrar_pago`) — a diferencia de un pago real (siempre negativo),
+    este sí tiene que SUMAR al saldo pendiente del período, nunca
+    restarle."""
+    _fijar_fecha(conn, "2026-08-15")
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "LiquidacionEmitida").crear(
+        IdProfesional=id_prof, Periodo="2026-08", MontoGenerado=1000,
+    )
+    obtener_repositorio(conn, "HistorialPagos").crear(
+        IdProfesional=id_prof, Monto=200, PeriodoImputado="2026-08", EsAjuste=1,
+    )
+    principales = calcular_estadisticas_principales(conn)
+    assert principales.saldo_pendiente == pytest.approx(1200.0)
 
 
 def test_estadisticas_principales_total_ingresos_y_balance_reusan_balance_del_negocio(conn):

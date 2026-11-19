@@ -182,22 +182,40 @@ def _total_liquidado_periodo(conn: sqlite3.Connection, periodo: str) -> float:
 def _saldo_pendiente_periodo(conn: sqlite3.Connection, periodo: str) -> float:
     """"Cuánto queda por cobrar de este mes": lo facturado en el período
     (`LiquidacionEmitida.MontoGenerado` de la ÚLTIMA emisión de cada
-    profesional, mismo criterio que `_total_liquidado_periodo`) menos lo
-    ya cobrado imputado a ese mismo período (`HistorialPagos.Monto`) —
-    PERO si un profesional pagó de más (ej. debía $500 y pagó $600), el
-    excedente ($100) queda a favor del próximo mes y NO se cuenta acá.
+    profesional, mismo criterio que `_total_liquidado_periodo`) más el
+    NETO de los movimientos imputados a ese mismo período
+    (`HistorialPagos.Monto` — ver `app.negocio.pagos.registrar_pago`:
+    "negativo se resta de la cuenta del profesional (un pago recibido,
+    que reduce lo que debe), positivo se suma (un cargo, que aumenta lo
+    que debe)", así que SUMAR el neto, no restarlo, es lo que corresponde
+    al signo real) — PERO si un profesional pagó de más (ej. debía $500
+    y pagó $600), el excedente ($100) queda a favor del próximo mes y NO
+    se cuenta acá.
 
-    Bug real encontrado y arreglado (pedido explícito de la clienta,
-    ejemplo dado: total liquidado $10.000, un profesional debía $500,
-    pagó $600 y deja $100 a favor del próximo mes — el saldo pendiente
-    tiene que ser $9500, no $9400): antes se restaba lo cobrado de TODOS
-    los profesionales de una sola vez contra el total liquidado global,
-    sin tope por profesional, así que el sobrepago de uno terminaba
-    reduciendo el saldo pendiente de los demás. Ahora se calcula
-    profesional por profesional — nunca se resta de un profesional más
-    de lo que su propia liquidación generó — y se suman los pendientes
-    individuales (el que ya pagó de más aporta $0, nunca un valor
-    negativo)."""
+    Bug real encontrado y arreglado DOS veces sobre este mismo cálculo:
+
+    1) (pedido explícito de la clienta, ejemplo dado: total liquidado
+       $10.000, un profesional debía $500, pagó $600 y deja $100 a favor
+       del próximo mes — el saldo pendiente tiene que ser $9500, no
+       $9400): antes se restaba lo cobrado de TODOS los profesionales de
+       una sola vez contra el total liquidado global, sin tope por
+       profesional, así que el sobrepago de uno terminaba reduciendo el
+       saldo pendiente de los demás. Se pasó a calcular profesional por
+       profesional, acotando cada uno a no bajar de $0.
+
+    2) (bug real encontrado con la base de datos REAL de la clienta: el
+       cuadrito mostraba Saldo pendiente $21.242.875, MÁS GRANDE que
+       Total liquidado $14.220.133, algo matemáticamente imposible con
+       este cálculo si el signo fuera el asumido): el arreglo de arriba
+       seguía restando `Pagado` (la suma de `Monto`) asumiendo que un
+       pago real se guarda en positivo — pero `registrar_pago` lo guarda
+       en NEGATIVO (ver arriba). Con el signo real, restar un pago
+       negativo lo SUMA al pendiente en vez de reducirlo — exactamente
+       lo que mostraba la base real (cuanto más había pagado un
+       profesional, más "pendiente" aparecía). Se corrige sumando el
+       neto en vez de restarlo (`Liquidado + Pagado`, con `Pagado`
+       negativo para un pago real), acotado igual que antes a no bajar
+       de $0 por profesional."""
     filas = conn.execute(
         """
         SELECT le.MontoGenerado AS Liquidado, COALESCE(pagos.Total, 0) AS Pagado
@@ -212,7 +230,7 @@ def _saldo_pendiente_periodo(conn: sqlite3.Connection, periodo: str) -> float:
         """,
         (periodo, periodo, periodo),
     ).fetchall()
-    return sum(max(f["Liquidado"] - f["Pagado"], 0) for f in filas)
+    return sum(max(f["Liquidado"] + f["Pagado"], 0) for f in filas)
 
 
 def calcular_estadisticas_ocupacion(conn: sqlite3.Connection) -> EstadisticasOcupacion:
