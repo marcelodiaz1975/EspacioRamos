@@ -4230,3 +4230,116 @@ queda_identificado_para_el_filtro_exclusivo`) y
 (`test_grilla_preview_se_refresca_al_crear_una_reserva_que_arranca_
 a_mitad_de_mes`, reproduce el reporte textual de la clienta de punta
 a punta vía `_PanelReservasRegulares._crear`).
+
+## Reservas aisladas/extraordinarias: cargar una a un profesional A marca su mensaje como enviado en Centro de mensajería
+
+Dos pedidos puntuales de la clienta sobre "Centro de mensajería", a
+partir del flujo de "Reservas aisladas"/"Reservas extraordinarias"
+(`app/gui/pantallas/reservas.py`):
+
+- Cargar (crear/confirmar/cancelar/modificar) una reserva aislada o
+  extraordinaria a un profesional A ya copia el mensaje de detalle al
+  portapapeles (`_copiar_mensaje_detalle`, sin cambios en eso) — ahora
+  ADEMÁS llama a `marcar_mensaje_aislada_generado` (`app.negocio.
+  mensajeria`, ya existía, hasta ahora solo la llamaba el botón
+  "Generar texto" del Centro de mensajería) cuando el profesional es
+  categoría A, así que ese profesional queda celeste->azul en el acto,
+  sin tener que pasar por esa pantalla a mano. Mismo arreglo duplicado
+  en las dos clases que tienen su propio `_copiar_mensaje_detalle`
+  (`_PanelReservasAisladas`/`_PanelReservaExtraordinaria`), mismo
+  criterio de "cada pantalla arma lo suyo" que ya usa el resto del
+  archivo.
+- El período que se marca como generado es `periodo_actual(conn)` (el
+  de HOY, igual que `_copiar_mensaje_detalle` ya usaba para armar el
+  mensaje) — NUNCA el período de la fecha de la reserva que se está
+  cargando. Esto es justamente lo que deja conforme al segundo pedido
+  de la clienta sin tocar nada más: "el celeste... que solo tenga
+  sentido con el avance de mes" — una reserva cargada en noviembre para
+  diciembre (`mensaje_detalle_reserva_aislada` ya arma un solo mensaje
+  con "del mes" + "posteriores") deja azul a NOVIEMBRE nomás; la fila
+  de `EstadoMensajeriaPeriodo` de diciembre para ese profesional nunca
+  se toca, así que al llegar diciembre (avance de mes) sigue celeste —
+  recordatorio de que ese mes puntual todavía no se le mandó nada,
+  aunque la reserva ya estuviera cargada de antes.
+
+Tests nuevos en `tests/test_gui_reservas.py`: `test_crear_reserva_
+aislada_de_profesional_a_marca_mensaje_generado_queda_azul`, `test_
+crear_reserva_aislada_de_profesional_a_para_el_mes_siguiente_no_lo_
+marca_azul_ese_mes` (noviembre queda azul, diciembre sigue celeste —
+`color_profesional` llamado con los dos períodos), `test_crear_reserva_
+extraordinaria_de_profesional_a_marca_mensaje_generado_queda_azul`.
+pyflakes limpio en `app/gui/pantallas/reservas.py`.
+
+## Reservas regulares: no regenerar la liquidación del período actual al crear/eliminar un horario con Vigencia futura
+
+Pedido de la clienta, con una corrección propia a mitad de camino.
+Versión original:
+
+> "Cuando cargo una reserva aislada dentro del mes en curso a imputar en
+> el mes siguiente a un profesional categoría R con reserva regular
+> activa, me marca en el centro de mensajería como que tengo que
+> enviar de nuevo la liquidación, como que no está enviada. No regenera
+> el archivo, eso está bien por que el cargo pasa para el próximo
+> período, pero hay que hacer esta corrección porque la liquidación del
+> mes vigente es la misma y no hace falta volver a enviar."
+
+Investigado a fondo (scripts de reproducción a nivel negocio y a nivel
+GUI completo, con el escenario EXACTO narrado) sin lograr reproducir
+ningún bug con una `ReservaAislada` — se reportó honestamente el
+resultado de la investigación en vez de asumir una causa. La clienta
+corrigió su propio reporte:
+
+> "No, me equivoqué en una cosa, no es una hora aislada lo que se
+> agregó, sino una hora regular que se agrega a partir del próximo mes
+> a un profesional que tiene horas regulares activas, antes reservaba
+> desde las 14hs, ahora lo va a hacer desde las 13hs a partir del mes
+> que viene. Me regeneró la liquidación sin ningún cambio, y me la
+> marcó en verde y como no enviada en el centro de mensajería."
+
+**Causa real**: la tarea #32 (ver el historial más arriba de este mismo
+archivo) ya había armado el guard `_afecta_economicamente_el_periodo_
+actual` (compara el total de la liquidación del período ANTES vs.
+DESPUÉS de la operación, y solo llama a `regenerar_si_corresponde` si
+de verdad cambió) y lo aplicó a `_modificar_seleccionada` de
+`_PanelReservasRegulares` — pero nunca a `_crear` ni a `_eliminar_
+seleccionada`, que seguían llamando `regenerar_si_corresponde` de forma
+incondicional. Confirmado por lectura directa del código, no solo por
+inferencia: sumar un horario NUEVO con `VigenciaInicio` en el mes que
+viene (una incorporación para el próximo período, no un cambio de este
+mes) no afecta en nada el total de la liquidación del mes en curso,
+pero como `_crear` nunca tenía el guard, regeneraba y marcaba "no
+enviada" la liquidación YA ENVIADA de este período igual.
+
+**Arreglo**: `_PanelReservasRegulares._crear()` y
+`._eliminar_seleccionada()` (`app/gui/pantallas/reservas.py`) suman el
+mismo patrón exacto que ya usaba `_modificar_seleccionada` desde la
+tarea #32 — capturar `_total_liquidacion_del_periodo` ANTES de la
+operación, ejecutarla, y solo regenerar si
+`_afecta_economicamente_el_periodo_actual` confirma un cambio real.
+
+Dos tests existentes (`test_crear_reserva_regular_regenera_liquidacion_
+enviada`, `test_eliminar_reserva_regular_regenera_liquidacion_enviada`)
+necesitaron `conn.execute("UPDATE Consultorio SET
+ValorHoraRegularActual = 1000")` tras `_preparar(conn)` — sin un valor
+hora real, crear/eliminar no cambia económicamente nada y el guard
+nuevo, correctamente, deja de regenerar (mismo motivo por el que
+`test_modificar_reserva_regular_regenera_liquidacion_enviada` ya tenía
+ese `UPDATE` desde la tarea #32). Dos tests nuevos reproducen
+directamente el escenario real reportado (horario nuevo con Vigencia
+en el mes próximo, para un profesional R que ya tenía horas regulares
+activas y liquidación "Enviada"): `test_crear_reserva_regular_con_
+vigencia_en_el_mes_proximo_no_regenera_el_periodo_actual` y
+`test_eliminar_reserva_regular_con_vigencia_en_el_mes_proximo_no_
+regenera_el_periodo_actual` — confirman que la liquidación del período
+actual se queda en "Enviada" (no se crea ninguna emisión nueva).
+
+Tests: `tests/test_gui_reservas.py` (+2 nuevos, +2 reescritos con el
+`UPDATE` de arriba). Suite conjunta de `test_gui_reservas.py`/`test_
+reservas.py`/`test_gui_panel_control.py`/`test_panel_control.py`/
+`test_gui_control_pagos.py`/`test_control_pagos.py`: 460 passed, 2
+failed — los 2 fallos son los ya conocidos de calibración de fuentes
+del sandbox en Reservas (`test_botones_de_accion_quedan_compactos_
+con_su_color`, `test_botones_de_aisladas_quedan_igual_de_compactos_
+que_los_de_regulares`, ver CLAUDE.md "Fallos conocidos del sandbox/
+contenedor"), ajenos a esta ronda. pyflakes limpio en `app/gui/
+pantallas/reservas.py` y `tests/test_gui_reservas.py`.

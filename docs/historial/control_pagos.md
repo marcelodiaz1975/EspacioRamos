@@ -494,3 +494,226 @@ nueva ubicación de los tres botones por fila. pyflakes limpio. Suite
 completa sin regresiones nuevas (mismos fallos conocidos del
 sandbox/reloj, ver CLAUDE.md) y sin el abort al cerrar en ninguna
 combinación de archivos probada.
+
+## Control de pagos (Carga y control): doce pedidos sobre vencimiento/importe/columna nueva/deshacer/etiquetas de conteo
+
+Ronda grande de pedidos puntuales de la clienta sobre `_PanelCargaControl`
+y `_DialogoEditarInstancia` (`app/gui/pantallas/control_pagos.py`):
+
+- El campo Vencimiento, al editar, arranca en la fecha de hoy (no en
+  "(sin fecha)") para que las flechas de teclado (`instalar_flechas_
+  cambian_fecha_completa`) muevan la fecha real día por día desde un
+  punto cercano, en vez de saltar desde la fecha mínima sentinel.
+- El campo Importe acepta "." como separador decimal además de ",":
+  `_SpinImporteControlPagos(_SpinMonto)` sobreescribe solo
+  `valueFromText` — cambio acotado a Control de pagos, no al
+  `_SpinMonto` compartido con Pagos.
+- Editar un ítem Archivado lo reabre como Pendiente (disponible para
+  abonar/archivar de nuevo).
+- Enter en el campo Importe avanza el foco a los botones del diálogo
+  (para poder confirmar con Espacio).
+- Conceptos con medio de pago "tarjeta" (`es_medio_pago_tarjeta`,
+  substring case-insensitive, mismo criterio que `_es_transferencia`/
+  `_es_sobre` en el resto del sistema): Vencimiento queda deshabilitado,
+  solo se carga Importe, y cargarlo marca la instancia Abonada
+  directamente.
+- Conceptos pagados a mano (caja de ahorro, no tarjeta): Vencimiento e
+  Importe van siempre juntos — cargar uno sin el otro rechaza el
+  diálogo con un aviso.
+- Columna nueva "Cuenta/Id" después de "Afectación": texto libre,
+  opcional, para el número de cuenta/servicio. Reusa `CampoLibre1` de
+  `InstanciaControlPago` (confirmado por `schema.sql` que ese campo
+  vive solo ahí, no en `ConceptoControlPago`) y se hereda de la
+  instancia más reciente del mismo concepto que lo tenga cargado
+  (`_cuenta_id_heredada`) al generar instancias nuevas o duplicar al
+  período próximo — se comporta como si fuera un dato del concepto sin
+  tocar el esquema. Ancho igual al de "Categoría", sacado mitad de
+  "Nombre" y mitad de "Afectación".
+- Los ítems Pendientes (sin vencimiento/importe) ya NO se archivan
+  solos al avanzar de mes — quedan en pantalla indefinidamente hasta
+  que se cargan o se archivan a mano. Se revierte `archivar_pendientes_
+  del_periodo` (`app/negocio/control_pagos.py`), que una ronda anterior
+  había sumado — se eliminó entera (función, llamada desde `avance_mes.
+  py`, campo del resumen, test). El avance de mes sigue generando las
+  instancias del período nuevo como siempre.
+- Botón "↩" (Deshacer) al final de cada fila, habilitado solo si la
+  fila tiene vencimiento o importe cargado: limpia los dos campos y
+  vuelve el ítem a Pendiente. Ancho sacado mitad de "Nombre" y mitad de
+  "Afectación".
+- Ancho de "Importe" +20% (mismo reparto mitad "Nombre"/mitad
+  "Afectación").
+- Cargar o editar un concepto deja la selección de la tabla parada en
+  esa fila (`_seleccionar_instancia`, llamado también después de crear,
+  abonar, archivar y duplicar al período próximo).
+- Cuatro etiquetas nuevas debajo de "Crear concepto": "Conceptos por
+  cargar", "Con vencimiento hoy", "Con vencimiento mañana", "Con
+  vencimiento en días" — y dos más debajo de "Eliminar registro
+  duplicado": "Con vencimiento vencido", "Conceptos archivados", más
+  "Total conceptos". Los siete conteos salen de `resumen_conteo_
+  vencimientos` (`app/negocio/control_pagos.py`), compartida con la
+  tarjeta nueva de Panel de control (ver `docs/historial/sistema.md`)
+  para no duplicar el cálculo — en "Carga y control" se calculan además
+  los cuatro filtros en cascada que ya tenía la pantalla, mientras que
+  en Panel de control es el total sin filtrar.
+
+Tests: ~6 nuevos en `tests/test_control_pagos.py` (detección de tarjeta,
+herencia de Cuenta/Id en generar/duplicar, `resumen_conteo_vencimientos`
+de siete buckets), renombrado el test de avance de mes en `tests/
+test_avance_mes.py` a `test_avanzar_mes_no_toca_las_instancias_de_
+control_pagos_pendientes_del_periodo_cerrado`, y ~15 nuevos en `tests/
+test_gui_control_pagos.py` (default de fecha, tarjeta deshabilita
+vencimiento y auto-abona, pago manual exige los dos campos juntos,
+columna Cuenta/Id, +20% de Importe, Deshacer habilitado/limpia, editar
+archivado reabre a Pendiente, selección tras crear/editar, etiquetas de
+conteo, foco a OK, parseo de "."). Suite completa: 23 + 40 tests,
+verificados sin regresiones.
+
+## Control de pagos ("Carga y control"): reordenar etiquetas, Vencimiento sin día de la semana, anchos Cuenta/Id -25%/Importe -20%, título "Filtros"
+
+Cuatro pedidos puntuales de la clienta sobre `_PanelCargaControl` (`app/
+gui/pantallas/control_pagos.py`):
+
+- Las tres etiquetas de conteo que vivían debajo de "Eliminar registro
+  duplicado" (columna 3) pasan a vivir debajo de las otras cuatro, en
+  la misma columna 2 (debajo de "Crear concepto") — las siete quedan
+  juntas, columna 3 se queda solo con los cuatro botones de acción
+  sobre el concepto seleccionado.
+- Vencimiento (tanto el `QDateEdit` de esta columna como el de
+  `_DialogoEditarInstancia`, y el texto de la columna "Vencimiento" de
+  la tabla) pasa a "dd-mm-yyyy", SIN el día de la semana abreviado que
+  usa el resto del sistema (`_campo_fecha`/`_campo_fecha_opcional`,
+  "ddd dd-MM-yyyy") — pedido puntual de esta pantalla, no una
+  generalización. Nueva función `_campo_vencimiento_sin_dia` (envuelve
+  `_campo_fecha_opcional` y le pisa el `displayFormat`) y `_fecha_dd_
+  mm_yyyy` (texto de tabla) en vez de mostrar el AAAA-MM-DD crudo que
+  se guarda en la base — el orden por click en el encabezado sigue
+  ordenando por ese AAAA-MM-DD real (`_clave_orden_columna`), no se
+  tocó.
+- "Cuenta/Id" (que una ronda anterior fijó al ancho de "Categoría") se
+  reduce un 25% más; "Importe" (que una ronda anterior fijó un 20% más
+  ancho que su ancho natural) se reduce un 20% más. El ancho liberado
+  lo siguen absorbiendo solas "Nombre"/"Afectación" (`Stretch`, sin
+  cálculo manual).
+- Título "Filtros" (`subtituloSeccion`, Nivel 2) arriba de "Nombre" en
+  la columna 4, y una línea divisoria vertical nueva (`QFrame.Shape.
+  VLine`, `_linea_divisoria_vertical`) entre las columnas 3 y 4.
+
+Tests nuevos en `tests/test_gui_control_pagos.py`: `test_las_siete_
+etiquetas_de_conteo_viven_todas_en_la_columna_2`, `test_columna_4_
+tiene_titulo_filtros_y_linea_divisoria_con_columna_3`, `test_
+vencimiento_formato_dd_mm_yyyy_en_campo_y_en_tabla`, `test_dialogo_
+editar_instancia_campo_vencimiento_formato_dd_mm_yyyy`; reescritos
+`test_tabla_carga_control_cuenta_id_despues_de_afectacion_y_ancho_25_
+por_ciento_menos_que_categoria` y `test_tabla_carga_control_importe_
+un_20_por_ciento_mas_ancho_menos_un_20_por_ciento` (antes contra el
+75%/80% de más arriba). Suite: 50 passed.
+
+## Control de pagos ("Historial"): columnas al mínimo/al formato, Vencimiento sin día, "Editar registro" restringido a períodos viejos, orden por click + F5
+
+Cinco pedidos puntuales de la clienta sobre `_PanelHistorialControlPagos`
+(`app/gui/pantallas/control_pagos.py`), que hasta esta ronda no tenía
+ningún ajuste de ancho propio (las columnas 1-4 en `Stretch`, el resto
+al tamaño default de Qt, nunca tocado):
+
+- "Período"/"Vencimiento" al ancho mínimo que entra el título sin
+  cortar (mismo criterio que `imagenes._ajustar_columnas`: `QFontMetrics`
+  sobre la fuente real del encabezado + `_COLCHON_TITULO_COLUMNA`).
+- Vencimiento a "dd-mm-yyyy" sin día de la semana, mismo criterio y
+  mismas funciones (`_campo_vencimiento_sin_dia`/`_fecha_dd_mm_yyyy`)
+  que la ronda de "Carga y control" de más arriba.
+- "Importe" al ancho de "$ 0.000.000,00" (`_TEXTO_IMPORTE_MAXIMO`/
+  `_PADDING_COLUMNA_IMPORTE`, mismo criterio que `pagos._TEXTO_MONTO_
+  MAXIMO`).
+- El ancho liberado por los tres puntos de arriba lo absorben solas
+  "Nombre"/"Afectación": para que "Categoría"/"Medio de pago" dejen de
+  competir por ese espacio, salen de `Stretch` y pasan a
+  `ResizeToContents` (antes las cuatro —Nombre, Categoría, Afectación,
+  Medio de pago— eran `Stretch` por igual).
+- "Editar registro" pasa a estar restringido a un registro VIEJO (de
+  un período anterior al actual, `instancia["Periodo"] < periodo_
+  actual(conn)`): uno del período actual o de uno posterior (duplicado
+  al próximo) se edita desde "Carga y control", que tiene el resto de
+  la lógica de ese período (tarjeta, vencimiento+importe juntos,
+  duplicar/eliminar duplicado) que el diálogo de "Historial" no
+  replica. El botón sigue habilitándose con cualquier selección (igual
+  que antes); es `_editar_registro` el que, al click, si el
+  seleccionado no es viejo, muestra una alerta explicando el por qué en
+  vez de abrir el diálogo.
+- Tabla ordenable por click en el encabezado (`OrdenTabla`, mismo
+  mecanismo que "Carga y control"/"Registrar pagos") y F5 (`reiniciar`,
+  nuevo: limpia selección, orden y los cuatro filtros) — antes esta
+  solapa no tenía ningún `reiniciar()`, F5 no hacía nada en ella.
+
+Tests nuevos: `test_historial_editar_registro_bloqueado_para_periodo_
+actual_con_alerta`, `test_historial_editar_registro_permite_un_periodo_
+viejo`, `test_historial_columnas_periodo_y_vencimiento_al_minimo_e_
+importe_para_formato_maximo`, `test_historial_vencimiento_formato_dd_
+mm_yyyy_en_tabla`, `test_historial_tabla_ordenable_por_click_en_
+encabezado`, `test_historial_f5_reinicia_filtros_orden_y_seleccion`.
+Suite completa de `test_gui_control_pagos.py` (incluye esta solapa y
+"Carga y control"): 50 passed. pyflakes limpio en `app/gui/pantallas/
+control_pagos.py`, `app/gui/pantallas/pagos.py` y los dos archivos de
+test tocados.
+
+## Carga y control: ancho de "Importe" para el formato máximo
+
+Mismo pedido ya aplicado en "Registrar pagos" (Monto/Saldo previo/
+Nuevo saldo) e "Historial" de este mismo módulo: "Importe" pasa de un
+% relativo a su ancho natural (que varía según los importes cargados
+en pantalla) a un ancho FIJO calculado con `QFontMetrics` para que
+entre exactamente "$ 0.000.000,00" (`_TEXTO_IMPORTE_MAXIMO`/
+`_PADDING_COLUMNA_IMPORTE`, ya existían, reusados tal cual — antes solo
+los usaba "Historial"). El ancho que esto libera lo sigue absorbiendo
+sola "Nombre"/"Afectación" (`Stretch`, sin cálculo manual). Test
+reescrito: `test_tabla_carga_control_importe_ancho_para_el_formato_
+maximo` (antes comparaba contra natural×1.2×0.8). Suite de `test_gui_
+control_pagos.py`: 50 passed.
+
+## Control de pagos ("Carga y control"): "Total expensas sin abonar" + saldos por banco, campo "N° transacción", Cuenta/Id a la derecha
+
+Cuatro pedidos puntuales de la clienta sobre `_PanelCargaControl` (`app/
+gui/pantallas/control_pagos.py`):
+
+- Etiqueta nueva "Total expensas sin abonar" debajo de "Eliminar
+  registro duplicado" (columna 3): suma el `Importe` de toda instancia
+  `Estado='Pendiente'` del período vigente cuyo concepto tiene
+  `Categoria='Expensas'`. Debajo, cuatro etiquetas más — "Saldo a
+  cubrir en CA Bco Patagonia"/"...Provincia"/"Saldo a cubrir Bco
+  Hipotecario"/"...Macro" — mismo criterio pero agrupado por `MedioPago`
+  (los cuatro medios de pago bancarios ya precargados en
+  `MedioPagoControlPagos`, ver `seed.py`), sin filtrar por categoría.
+  Nueva función `saldos_expensas_y_bancos` (`app/negocio/control_pagos.
+  py`) — a diferencia de las siete etiquetas de conteo de la columna 2
+  (que SÍ reflejan los cuatro filtros en cascada de la columna 4), estas
+  cinco son totales absolutos del período actual, siempre sobre TODO lo
+  cargado (mismo criterio que los totales "sin filtro" de Panel de
+  control). Los cinco `QLabel` necesitan `setWordWrap(True)` +
+  `setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)` — sin esto, el texto largo
+  ("Saldo a cubrir en CA Bco Patagonia: $...") ensanchaba esa columna
+  más que las otras tres del `QHBoxLayout` con `stretch=1` parejo.
+- Campo nuevo "N° transacción (opcional)" en `_DialogoEditarInstancia`,
+  debajo de "Cuenta/Id (opcional)": texto libre, reusa `CampoLibre2` de
+  `InstanciaControlPago` (`CampoLibre1` ya lo usa Cuenta/Id) — pedido
+  explícito de la clienta: "por si el día de mañana tengo que
+  consultar", sin mostrarse en ninguna columna de ninguna tabla (a
+  diferencia de Cuenta/Id) ni heredarse de un período al siguiente (es
+  el número de operación de ESE pago puntual, no un dato del concepto).
+  `actualizar_instancia` suma el parámetro `numero_transaccion` →
+  `CampoLibre2`.
+- Columna "Cuenta/Id" de la tabla de "Carga y control" pasa a alineada
+  a la derecha (`item_numero`, mismo helper que las columnas numéricas,
+  aunque el contenido sea texto libre).
+
+Tests: `tests/test_control_pagos.py` (+2: `saldos_expensas_y_bancos`
+con pendiente/abonado/otro medio de pago mezclados; `numero_
+transaccion` mapea a `CampoLibre2` sin tocar `CampoLibre1`).
+`tests/test_gui_control_pagos.py` (+4: alineación de Cuenta/Id, las
+cinco etiquetas muestran los valores de `saldos_expensas_y_bancos`,
+el campo del diálogo precarga desde `CampoLibre2`, guardar vía
+"Editar" persiste el número de transacción sin sumar ninguna columna
+nueva a la tabla; 3 fakes `_DialogoFalso` de tests preexistentes
+actualizados con el método `numero_transaccion()` nuevo). Suite:
+27 + 50 passed, más 171 passed en la corrida conjunta con `test_
+avance_mes.py`/`test_catalogos.py` (los 3 fallos de `test_avance_mes.py`
+son los conocidos por el reloj real del sandbox, ajenos a esta ronda).
+pyflakes limpio en los cuatro archivos tocados.

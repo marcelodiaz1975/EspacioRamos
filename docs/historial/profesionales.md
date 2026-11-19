@@ -382,3 +382,48 @@ muestra la suma de los dos en vivo (se actualiza con cada
 se pueda ver de un vistazo "lo que me debe en total" sin tener que
 sumar a mano. Test nuevo en `tests/test_profesionales.py`:
 `test_dialogo_muestra_saldo_total_combinado_y_se_actualiza_en_vivo`.
+
+## PDF de liquidación: checkbox "Ocultar hora de liberación" por profesional
+
+Consulta de la clienta: "cómo puedo manejar a un profesional que
+quiero que le aparezca en su PDF una información diferenciada..? Solo
+a él, no al resto... Necesito que en el cuadro de los bloques
+reservados en la columna 'Hora liberación' aparezca '-' en lugar de
+'21hs', solo ese cambio." Propuesta aceptada: "De acuerdo con el
+enfoque en el check de liberación dentro de la ficha del profesional,
+por defecto que se vea la hora real, si pongo el check activo esa
+diferencia a aplicar en el PDF."
+
+`Profesional` suma la columna `OcultarHoraLiberacionPdf` (booleana,
+default 0 — tanto en `schema.sql` como en `_COLUMNAS_NUEVAS`,
+`app/db/migraciones.py`, mismo mecanismo genérico de `ALTER TABLE ...
+ADD COLUMN` que cualquier columna nueva simple). `_campos_profesional`
+(`app/gui/pantallas/profesionales.py`) suma
+`Campo("OcultarHoraLiberacionPdf", "Ocultar hora de liberación en el
+PDF", tipo="booleano")` — el checkbox sale gratis del motor genérico de
+`PantallaCRUD`/`Campo`, sin tocar `crud_generico.py`.
+
+`_tabla_bloques_horarios` (`app/pdf/liquidacion_pdf.py`, ver `docs/
+historial/liquidaciones.md` para la otra mitad de esta misma ronda de
+trabajo) suma el parámetro `ocultar_hora_liberacion: bool = False`: el
+PDF es siempre de UN solo profesional (el titular de la liquidación),
+así que un único flag alcanza para toda la tabla — sin él, cada bloque
+muestra "-" en vez de la hora real solo en la columna "Hora
+liberación" (el resto de la fila, Hora inicio incluida, no cambia).
+`generar_pdf_liquidacion` lo pasa desde
+`profesional["OcultarHoraLiberacionPdf"]`, ya resuelto una sola vez al
+cargar el profesional.
+
+Tests: `tests/test_profesionales.py` (+3: el checkbox arranca
+destildado en un alta nueva, se guarda tildado, precarga tildado al
+editar un registro que ya lo tenía); `tests/test_pdf_liquidacion.py`
+(+4: `_tabla_bloques_horarios` por defecto/con el flag, integración
+end-to-end vía `generar_pdf_liquidacion` con/sin el profesional
+tildado). Suite conjunta de `test_pdf_liquidacion.py`/`test_
+profesionales.py`/`test_gui_profesionales_formulario.py`/`test_
+migraciones.py`/`test_documentacion_profesional.py`: 175 passed, 1
+failed — el fallo es el ya documentado de calibración de fuentes del
+sandbox en Profesionales (ver CLAUDE.md, "Fallos conocidos del
+sandbox/contenedor"), ajeno a esta ronda. pyflakes limpio en `app/pdf/
+liquidacion_pdf.py`, `app/db/migraciones.py`, `app/gui/pantallas/
+profesionales.py` y los dos archivos de test tocados.

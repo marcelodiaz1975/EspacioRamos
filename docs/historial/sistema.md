@@ -1495,3 +1495,480 @@ aplica. Tests nuevos: `test_buscar_con_un_solo_resultado_lo_selecciona_
 solo`, `test_buscar_con_mas_de_un_resultado_no_selecciona_nada`
 (`tests/test_gui_reinicio_prueba.py`).
 
+
+## Panel de control: se saca la sección "Alertas", se agrega el cuadro "Control de pagos"
+
+Pedido explícito de la clienta: eliminar por completo la sección
+"Alertas" de Panel de control, y sumar tres cuadritos más a la grilla
+(ahora 9, en 3 filas de 3, en vez de 6 + Alertas aparte). El cuadrito
+inferior izquierdo pasa a llamarse "Control de pagos" y replica las
+siete etiquetas de conteo de "Carga y control" (ver `docs/historial/
+control_pagos.md` — mismo `resumen_conteo_vencimientos`, sin los
+cuatro filtros que ahí sí se aplican, porque Panel de control muestra
+el total real) — "Con vencimiento hoy"/"Con vencimiento mañana" se
+resaltan en rojo y negrita cuando el conteo es mayor a cero, el resto
+de las líneas queda siempre en texto plano. Los otros dos cuadritos
+nuevos (inferior centro e inferior derecha) quedan sin asignar por
+ahora — consultado explícitamente con la clienta vía pregunta directa,
+eligió dejarlos vacíos (solo el título "(Sin asignar):") en vez de
+definir su contenido en esta ronda.
+
+Se eliminó de `app/negocio/panel_control.py` el dataclass `Alertas`,
+`calcular_alertas` y sus helpers exclusivos (`_reserva_regular_activa`,
+`_deuda_regulares_alerta`, `_planes_con_cuotas_vencidas`, `_fechas_
+especiales_proximas`, `_categoria_x_con_llaves_pendientes`) —
+confirmado por grep que ningún otro módulo los importa (otras pantallas
+con nombres parecidos, ej. `mensajeria.py`/`placas.py`, tienen sus
+propias funciones independientes). `_deuda_regulares`/`_deuda_aisladas`
+se mantuvieron: los sigue usando `calcular_estadisticas_profesionales`
+(el cuadrito "Profesionales", que no cambió). La grilla de tarjetas de
+`PanelAvanceMes._armar_ui` pasa de una estructura hardcodeada (2 filas +
+Alertas aparte) a un loop genérico sobre listas de 3 en 3, mismo
+`stretch=1` por fila para que todas midan igual de alto.
+
+Tests: eliminados 13 tests de alertas en `tests/test_panel_control.py`
+y 7 en `tests/test_gui_panel_control.py` (3 de alertas puntuales + 2 de
+ancho + 2 de scroll/estilo), renombrado/reescrito el test de "seis
+tarjetas parejas" a `test_nueve_tarjetas_parejas_en_tres_filas`, y
+sumados 4 tests nuevos: `test_tarjeta_control_pagos_muestra_los_siete_
+conteos`, `test_tarjeta_control_pagos_resalta_vencimiento_hoy_y_mañana_
+en_rojo_y_negrita`, `test_tarjeta_control_pagos_sin_vencimientos_
+proximos_no_resalta`, `test_tarjetas_vacias_no_tienen_contenido_
+asignado`. pyflakes limpio en los cuatro archivos tocados
+(`app/gui/pantallas/panel_control.py`, `app/negocio/panel_control.py`,
+`tests/test_panel_control.py`, `tests/test_gui_panel_control.py`);
+suite completa de los dos archivos de test: 94 passed.
+
+## Panel de control: reordenar "Estadísticas principales" + corregir Total liquidado/Saldo pendiente
+
+Dos pedidos sobre el cuadrito "Estadísticas principales mes en curso"
+(`PanelAvanceMes`, `app/gui/pantallas/panel_control.py`):
+
+- Reorden pedido explícitamente: "Gastos operativos"/"Balance de
+  negocio" pasan a estar inmediatamente después de "Total ingresos";
+  "Total liquidado"/"Saldo pendiente de cobro (de lo liquidado)" quedan
+  al final (antes estaban en el medio, antes de Gastos/Balance).
+- Auditoría pedida de "Total liquidado"/"Saldo pendiente": "Total
+  liquidado" (`_total_liquidado_periodo`, `app/negocio/panel_control.
+  py`) YA estaba correcto de una ronda anterior (dedup a la última
+  emisión por profesional vía `MAX(IdLiquidacion) GROUP BY
+  IdProfesional`, sobre `MontoGenerado` — que ya incluye todos los
+  conceptos: especiales, descuentos de feriados/vacaciones/licencias,
+  horas agregadas, aisladas, cuotas de plan — todo lo que la clienta
+  describió), no hizo falta tocarlo.
+
+  **Bug real encontrado y arreglado en "Saldo pendiente de cobro"**
+  (`_saldo_pendiente_periodo`): el ejemplo que dio la clienta — "total
+  liquidado $10.000, un profesional tiene que abonar $500, abona $600 y
+  deja $100 a favor del próximo mes, el saldo pendiente tiene que decir
+  $9500, no $9400" — exponía que el cálculo restaba lo cobrado de TODOS
+  los profesionales de una sola vez contra el total liquidado global
+  (`total_liquidado - SUM(HistorialPagos.Monto)` sin agrupar), sin
+  ningún tope por profesional: el sobrepago de uno terminaba reduciendo
+  el saldo pendiente de los demás en vez de quedar como crédito propio
+  a favor del mes próximo. Se reescribe para calcular profesional por
+  profesional (liquidado de su última emisión del período vs. cobrado
+  imputado a ese mismo período) y sumar los pendientes individuales,
+  cada uno acotado a no bajar de $0 (`max(Liquidado - Pagado, 0)`) — el
+  que pagó de más aporta $0, nunca un valor negativo que termine
+  compensando la deuda de otro.
+
+Tests: `tests/test_panel_control.py` (+1: escenario exacto del ejemplo
+de la clienta, dos profesionales, uno sobrepaga y el otro no paga nada,
+saldo pendiente = $9500 no $9400 — el test preexistente de saldo
+pendiente de un solo profesional sigue pasando tal cual, el cálculo por
+profesional coincide con el global cuando hay uno solo);
+`tests/test_gui_panel_control.py` (+1: orden de las cinco etiquetas en
+el texto de la tarjeta). Suite: 32 + 64 passed, más 281 passed en la
+corrida conjunta con `test_control_pagos.py`/`test_migraciones.py`/
+`test_gui_balance.py`/`test_gui_control_pagos.py`/`test_balance.py`/
+`test_gastos_operativos.py` (confirma que ningún cambio de esta ronda
+pisó a los anteriores). pyflakes limpio en `app/negocio/panel_control.
+py`, `app/gui/pantallas/panel_control.py` y los dos archivos de test.
+
+## Panel de control: segundo bug real en "Saldo pendiente de cobro" — el signo de `HistorialPagos.Monto`
+
+La clienta mandó capturas Y la base de datos real del espacio,
+preguntando directamente qué incluye cada concepto porque "no
+encuentro relación" entre los números — el cuadrito real mostraba
+Saldo pendiente $21.242.875, MÁS GRANDE que Total liquidado
+$14.220.133, matemáticamente imposible con el cálculo de la ronda
+anterior si el signo fuera el asumido (la suma de pendientes por
+profesional, cada uno acotado a no superar su propio liquidado, nunca
+puede superar la suma total liquidada).
+
+**Causa real**: la ronda anterior (ver arriba) corrigió el "sin tope
+por profesional" pero siguió asumiendo que `HistorialPagos.Monto` es
+positivo para un pago real ("debía $500, pagó $600"). Es al revés:
+`app.negocio.pagos.registrar_pago` (su propio docstring) guarda
+`Monto` CON SIGNO — **negativo** para un pago recibido (resta de la
+cuenta, reduce lo que debe) y **positivo** para un cargo/ajuste (suma,
+aumenta lo que debe); confirmado también en la GUI de "Registrar
+pagos" (`nuevo_saldo = saldo_total + monto`, un monto negativo hace
+bajar el saldo). La fórmula de la ronda anterior RESTABA `Pagado` (la
+suma de `Monto`) de `Liquidado`, así que un pago real (negativo) en vez
+de reducir el pendiente lo AUMENTABA — exactamente lo que mostraba la
+base real: cuanto más pagó un profesional, más alto salía su
+"pendiente". Verificado armando un script puntual contra la base real
+adjunta (`get_connection` + `calcular_estadisticas_principales`):
+reproducía el mismo $21.242.875 del cuadrito, y con la fórmula
+corregida (sumar en vez de restar) baja a $7.631.152 — ya por debajo
+del total liquidado, como corresponde.
+
+**Arreglo**: `_saldo_pendiente_periodo` pasa de `max(Liquidado -
+Pagado, 0)` a `max(Liquidado + Pagado, 0)` por profesional — sumar el
+NETO de los movimientos del período (no restarlo) es lo que corresponde
+al signo real: un pago real (negativo) sigue reduciendo el pendiente
+(ahora sí, al sumarlo), y un ajuste positivo (un cargo que aumenta la
+deuda del período) ahora SUMA al pendiente en vez de restarle, que es
+el comportamiento correcto para ese caso.
+
+Los dos tests de la ronda anterior que simulaban un pago con `Monto`
+POSITIVO (irreal — un pago real nunca se guarda así) se corrigen a
+`Monto` negativo, manteniendo el mismo resultado esperado en pesos
+(la fórmula corregida da el mismo número que la fórmula vieja daba con
+el signo vuelto al revés, así que los valores esperados de los tests
+no cambiaron, solo el signo de la entrada). Se suma un test nuevo para
+el caso de un ajuste positivo (debía cubrir el caso que la ronda
+anterior no contemplaba: un cargo, no un pago, imputado al período).
+
+Tests: `tests/test_panel_control.py` (signo corregido en los dos tests
+de saldo pendiente existentes — `Monto=-4000`/`Monto=-600` en vez de
+positivo —, +1 nuevo:
+`test_estadisticas_principales_saldo_pendiente_un_ajuste_positivo_
+suma_deuda_del_periodo`). Suite: 33 passed, más 168 passed en la
+corrida conjunta con `test_balance.py`/`test_gastos_operativos.py`/
+`test_gui_panel_control.py` (ver también `docs/historial/balance.md`
+para la mitad "Gastos" de esta misma ronda de trabajo). pyflakes
+limpio en `app/negocio/panel_control.py`. Verificado además contra la
+base de datos real adjunta por la clienta (`espacio_ramos.db`) que el
+número final del cuadrito queda por debajo del total liquidado, como
+corresponde.
+
+## Panel de control: desglose de "Total liquidado" (feriados/vacaciones/aisladas/cuotas)
+
+La clienta preguntó, con capturas reales, por qué "Monto por reservas
+regulares" sale más alto que "Total liquidado" y cómo se calcula cada
+concepto — se le explicó (y se confirmó con su base real) que la
+diferencia viene de que "Monto por reservas regulares"/"Monto por
+reservas aisladas" miran la grilla/reservas VIGENTE tal cual, mientras
+que "Total liquidado" resta lo que la liquidación de cada profesional
+descuenta por ausencias reales del mes (feriados no trabajados,
+vacaciones, licencias) y suma lo que no está en la grilla regular
+(aisladas, cuotas de planes de pago). A pedido explícito, esas cuatro
+líneas se agregan al cuadrito para que la diferencia se vea de un
+vistazo, entre "Total liquidado" y "Saldo pendiente de cobro".
+
+**Tres preguntas de la clienta, respondidas con el código real (no solo
+de palabra, confirmado leyendo `app.negocio.liquidaciones`/`vacaciones`/
+`licencias`):**
+
+1. El subtotal de reservas regulares (`Tramo.subtotal`, usado tanto por
+   `monto_neto_regular_periodo` como por `calcular_liquidacion`) YA está
+   neto del descuento por volumen de horas semanales — nunca es el
+   bruto.
+2. Feriados (recalculado día a día, con el % vigente ESE día —
+   `_monto_feriado_dia`) y vacaciones/licencias (`ValorBonificado`,
+   congelado al cargar la vacación/licencia pero YA calculado con el %
+   vigente en ese momento, ver `crear_vacacion`/`crear_licencia`) también
+   están netos de ese mismo descuento — ninguno de los dos trabaja sobre
+   el valor bruto.
+3. **Hallazgo real, corrige una suposición equivocada de la clienta**:
+   "Monto por reservas aisladas" (`monto_neto_aislada_periodo`, en
+   `app.negocio.estadisticas`) NO filtra por categoría de profesional —
+   suma TODAS las `ReservaAislada` confirmadas del período, incluidas
+   las de categoría A (que nunca entran en ninguna liquidación mensual,
+   se cobran aparte). Confirmado con la base real: de las aisladas de
+   noviembre, 58 eran de profesionales A y solo 20 de R — la mayoría del
+   monto que se ve en ese cuadrito corresponde a profesionales que
+   jamás tienen una liquidación. Dato a tener en cuenta para la "vista
+   previa de balance del negocio" que la clienta quiere armar en el
+   octavo cuadrito (en espera de más definición de su parte).
+
+### Implementación
+
+`DesgloseLiquidaciones`/`_desglose_liquidaciones_periodo` (`app/
+negocio/panel_control.py`, nuevo campo `EstadisticasPrincipales.
+desglose_liquidaciones`): recorre los profesionales con una
+`LiquidacionEmitida` este período (misma población que `_total_
+liquidado_periodo`) y recalcula la liquidación de cada uno AHORA con
+`calcular_liquidacion` — mismo criterio "en vivo" que ya usan `monto_
+neto_regular_periodo`/`monto_neto_aislada_periodo` en este mismo
+cuadrito (puede no coincidir centavo a centavo con el `MontoGenerado`
+ya congelado si algo cambió después de emitida la liquidación, mismo
+caso ya documentado para feriados/aisladas — sirve para explicar de un
+vistazo, no para una reconciliación exacta). Categoría E (se consolida
+en la liquidación de su R) y categoría B (nunca se liquida) hacen que
+`calcular_liquidacion` tire `ValueError` — se ignoran en el loop, su
+aporte ya está contado en la liquidación del R que las consolida.
+`descuento_feriados`/`descuento_vacaciones_licencias` se guardan en
+NEGATIVO (restan, mismo signo con el que ya trabaja `formatear_moneda`
+para mostrar el "-" solo); `aisladas_en_liquidaciones`/`cuotas_planes_
+pago` en positivo (suman). Tiempo medido contra la base real de la
+clienta (109 profesionales): 0.175s — no hace falta ningún `Procesando`.
+
+Tests: `tests/test_panel_control.py` (+2: escenario con los cuatro
+conceptos a la vez —feriado, vacación, aislada, cuota de plan—, montos
+verificados contra las mismas fórmulas de `calcular_liquidacion`; y
+una `LiquidacionEmitida` de categoría E con `MontoGenerado=0` no rompe
+el desglose); `tests/test_gui_panel_control.py` (+1: las cuatro líneas
+quedan entre "Total liquidado" y "Saldo pendiente de cobro"). Suite:
+35 + 65 passed, más 153 passed en la corrida conjunta con `test_
+liquidaciones.py`. pyflakes limpio en `app/negocio/panel_control.py`,
+`app/gui/pantallas/panel_control.py` y los dos archivos de test.
+
+## Panel de control ("Avance de período, backup, y vista rápida"): rediseño completo de la grilla + "Estadísticas principales mes en curso" con tres cuentas en cascada; Balance del negocio ("Ingresos"): columnas rediseñadas
+
+Pedido explícito de la clienta, mensaje textual (ver el hilo completo
+para la redacción exacta de cada línea — se resume acá el resultado):
+"Vamos a rediseñar la solapa... El tercer cuadro 'Ocupación y horas mes
+en curso' ponelo en el segundo cuadro... El sexto cuadro 'Cumpleaños y
+días de profesión' lo pones debajo del cuadro 'Feriados y fechas
+especiales próximas'... Quedaron libres los tres cuadros de la derecha,
+esos los vamos a unificar, queda un solo cuadro largo, ahi vamos a
+poner todas las estadísticas mas detalladas". Avisó explícitamente:
+"Avisame por cualquier duda, comentario o sugerencia" — se le hicieron
+4 preguntas de aclaración antes de tocar código (ver abajo, cada una
+cambió o confirmó una parte del diseño).
+
+### Grilla: de 3x3 pareja a 2 columnas de 3 + 1 columna larga
+
+La clienta corrigió por su cuenta una primera lectura equivocada del
+pedido (yo había asumido que el séptimo cuadro quedaba "mezclado" con
+Feriados en el mismo marco — nunca fue así, los corrigió antes de que
+se tocara código): "Van a quedar dos columnas de tres cuadritos, y una
+columna entera de un solo cuadro a la derecha, en total son 7, 6 chicos
+y uno largo." Con el orden exacto que dio:
+
+- Columna 1 (de arriba a abajo): "Período actual y último backup",
+  "Profesionales", "Control de pagos".
+- Columna 2 (de arriba a abajo): "Ocupación y horas mes en curso",
+  "Feriados y fechas especiales próximas", "Cumpleaños y días de
+  profesión".
+- Columna 3: un solo cuadro LARGO, "Estadísticas principales mes en
+  curso" (ver abajo).
+
+Se eliminan los dos cuadritos "(Sin asignar)" que habían quedado libres
+de la ronda anterior — ya no hace falta nada vacío en este diseño.
+`_armar_ui` (`app/gui/pantallas/panel_control.py`) pasa del loop
+genérico sobre una grilla 3x3 (`QHBoxLayout` por fila) a dos `QVBoxLayout`
+("columna_1"/"columna_2", tres cuadritos cada una con `stretch=1`) más
+un `QHBoxLayout` externo ("fila_columnas") que pone esas dos columnas
+y la tarjeta larga como tres hermanos, los tres con `stretch=1` — así
+las tres "columnas" quedan del mismo ancho, y la columna larga queda
+del alto de las otras dos juntas (sus tres cuadritos chicos + el
+espaciado entre ellos). Se elimina `_armar_tarjeta_vacia` (de baja, sin
+otro uso) y la constante `_COLUMNAS_GRILLA` (ya no hace falta, el
+armado deja de ser un loop genérico sobre N columnas).
+
+### "Estadísticas principales mes en curso": rediseño completo, tres cuentas en cascada
+
+Diseño pedido por la clienta, tres secciones con subtítulo en itálica,
+línea divisoria antes del total, y el total en negrita:
+
+1. **"Liquidaciones mes en curso"**: Monto neto reservas regulares +
+   Descuentos por feriados no trabajados (resta) + Descuentos por
+   vacaciones (resta) + Descuentos por licencias (resta) + Reservas
+   aisladas + Feriados trabajados + Cargos especiales + Cuotas de
+   planes de pago + Otros ajustes = **Total liquidado mes en curso**.
+2. **"Resultado del negocio"**: Total liquidado mes en curso + Horas
+   aisladas por fuera de la liquidación + Reservas extraordinarias por
+   fuera de la liquidación + Otros conceptos por fuera de la
+   liquidación − Gastos operativos = **Balance del negocio**.
+3. **"Monto a cobrar en el mes en curso"**: Monto liquidado más horas
+   aisladas − Monto cobrado hasta el momento = **Monto restante del
+   mes a cobrar**.
+
+Cuatro preguntas de aclaración, y las cuatro decisiones que fijaron:
+
+- **Q1** (si "Monto total liquidado" en Ingresos/Resultado debía seguir
+  filtrando por ubicación): la clienta eligió la opción recomendada,
+  "Deja de filtrarse por ubicación" — una liquidación es por
+  PROFESIONAL, no se puede partir prolijamente por Consultorio (los
+  descuentos de feriados/vacaciones no son por ubicación).
+- **Q2** (qué hacer con los conceptos más raros de una liquidación —
+  reversión de descuento, feriados pendientes, horas agregadas, ajuste
+  por saldo atrasado, ajuste de redondeo — que no tenían línea propia
+  en el diseño original de 8 líneas): "Sumarlos en una línea extra
+  'Otros ajustes'" — así "Total liquidado mes en curso" cierra SIEMPRE
+  exacto con la suma de las liquidaciones recalculadas, nunca "si no
+  coincide es porque falta algún concepto".
+- **Q3** (cómo tratar lo que generan los profesionales categoría A por
+  fuera de cualquier liquidación, más allá de las aisladas): la
+  clienta agregó, con el mismo criterio que "Horas aisladas por fuera
+  de la liquidación", dos líneas más — "Reservas extraordinarias por
+  fuera de la liquidación" y "Otros conceptos por fuera de la
+  liquidación" (llaves + cargos especiales sueltos) — y pidió que
+  "Monto cobrado hasta el momento" considere los tres para que la
+  cuenta cierre ("las horas aisladas, las reservas extraordinarias y
+  los conceptos especiales"). En "Ingresos" (Balance del negocio, ver
+  `docs/historial/balance.md`), la columna pasa a llamarse "Ingresos
+  por fuera de las liquidaciones" y reflejar la suma de esos mismos
+  tres conceptos.
+- **Q4** (la disposición exacta de la grilla): corrigió una lectura
+  equivocada mía (ver arriba) y dio el orden exacto de las dos
+  columnas de 3 + la columna larga.
+
+### Negocio: `DesgloseLiquidaciones` (10 campos) + `DesgloseFueraDeLiquidacion` (nueva, en `balance.py`)
+
+`app/negocio/panel_control.py`, `DesgloseLiquidaciones` pasa de 4
+campos a 8 líneas visibles + `otros_ajustes` (catch-all) + `cobrado_r`
+(no se muestra como línea propia, solo alimenta la Sección 3) — los 8+1
+campos suman EXACTO la misma fórmula que `Liquidacion.monto_generado`
+(verificado término a término contra esa property), así que "Total
+liquidado mes en curso" (`DesgloseLiquidaciones.total`, property nueva)
+nunca puede "no coincidir" por faltar un concepto. `_desglose_
+liquidaciones_periodo` sigue recalculando EN VIVO con `calcular_
+liquidacion` para cada profesional con una liquidación emitida este
+período (igual que antes) — `cobrado_r` se calcula reusando la fórmula
+ya establecida de "pendiente acotado por profesional" (`pendiente =
+max(monto_generado + pagado, 0)`, con `pagado` negativo para un pago
+real) y derivando `cobrado = monto_generado - pendiente`.
+
+`app/negocio/balance.py` suma `DesgloseFueraDeLiquidacion` (`aisladas_
+normales`/`reservas_extraordinarias`/`otros_conceptos`/`cobrado`, +
+property `bruto`) y `fuera_de_liquidacion_periodo`: recorre cada
+profesional categoría A (nunca tiene liquidación mensual propia) y
+arma, por `Fecha` real del movimiento (a diferencia del desglose de
+arriba, que mira si algo "entra" en una liquidación, no la fecha real):
+aisladas comunes (mismo criterio que `app.negocio.mensajes.
+movimiento_periodo_aislada`, duplicado a propósito en vez de reusar esa
+función para no tocar un camino compartido con Centro de mensajería —
+mismo criterio de duplicación aceptada entre módulos sin relación que
+ya usa el resto del sistema), reservas extraordinarias (`MontoExtraordinario`
+a mano), y "otros conceptos" (depósitos/reintegros de `LlaveMovimiento`
++ `CargoEspecial` sin `IdLlave`, para no contar dos veces un cargo ya
+atado a una llave). `cobrado` usa el mismo tope por profesional que
+`cobrado_r`.
+
+`monto_liquidado_periodo` (nueva, `balance.py`) reemplaza a la vieja
+`_total_liquidado_periodo` de `panel_control.py` (de baja, junto con
+`_saldo_pendiente_periodo`, también de baja) — es el valor FROZEN (el
+`MontoGenerado` real tal como se facturó, con los valores vigentes al
+emitir cada liquidación), a propósito DISTINTO del recálculo en vivo
+de `DesgloseLiquidaciones` — Ingresos/Resultado pueden mostrar
+cualquier período histórico, así que no tiene sentido reconstruirlo con
+tarifas de HOY. Los dos valores coinciden en el caso normal (nada
+cambió desde la emisión) pero pueden divergir si algo cambió después
+— divergencia aceptada, documentada en el docstring de la función.
+`ingresos_feriados_trabajados_periodo` queda eliminada (de baja, sin
+otro consumidor) — ese concepto ya viene incluido dentro del
+`MontoGenerado` congelado.
+
+`total_ingresos_periodo` pasa a devolver `(monto_liquidado, fuera_de_
+liquidacion_bruto)` en vez de la tupla de 3 vieja — `ids_consultorio`
+queda como parámetro sin usar (compatibilidad de firma con
+`resultado_periodo`, que SÍ sigue filtrando Gastos operativos por
+ubicación). `resultado_periodo` no cambia de firma, solo de qué suma
+para "ingresos".
+
+### GUI: `app/gui/pantallas/panel_control.py` y `app/gui/pantallas/balance.py`
+
+`_armar_tarjeta_estadisticas_principales` deja de ser un solo `QLabel`:
+pasa a ser un `QWidget` con su propio `QVBoxLayout` (mismo patrón que
+"Período actual y último backup") con, por cada una de las tres
+secciones, un subtítulo en itálica (`_subtitulo_italica`, nuevo
+helper), una etiqueta de detalle (`QLabel` con las líneas de esa
+sección), una línea divisoria (`_linea_divisoria`, ya existía) y una
+etiqueta de total en negrita (`setStyleSheet("font-weight: bold;")`) —
+con una línea de espacio (`addSpacing(12)`) entre una sección y la
+siguiente. `actualizar()` llena cada una de esas seis etiquetas por
+separado en vez de un único `setText` con todo el bloque.
+
+"Ingresos" (`_PanelIngresos`, `balance.py` — ver `docs/historial/
+balance.md`): `_COLUMNAS_INGRESOS` pasa de 5 columnas a 4; `_fila`/
+`_llenar_filas` desempaquetan la tupla nueva de 2 valores de `total_
+ingresos_periodo` en vez de la de 3. "Resultado" no cambia de columnas,
+solo hereda el "Total ingresos" nuevo.
+
+### Tests
+
+`tests/test_balance.py`: reescritos los tests de `total_ingresos_
+periodo` (ahora usa `emitir_liquidacion` real en vez de calcular en
+vivo desde reservas sueltas — el "monto liquidado" es FROZEN), eliminado
+el test de `ingresos_feriados_trabajados_periodo` (función de baja),
++1 nuevo (`test_fuera_de_liquidacion_periodo_desglosa_tres_conceptos_y_
+acota_el_cobrado`, con aislada+extraordinaria+llave+pago de más).
+`tests/test_panel_control.py`: reescritos los tests de "saldo
+pendiente" (ya no existe — ahora prueban `monto_cobrado`/`monto_
+restante_a_cobrar`, con reservas reales + `emitir_liquidacion` en vez
+de filas de `LiquidacionEmitida` a mano, porque el recálculo en vivo ya
+no lee `MontoGenerado`), reescrito el test de "no duplica reemisiones"
+(ahora prueba que el `GROUP BY` no recalcula dos veces al mismo
+profesional), actualizados los nombres de campo en los tests de
+desglose (`descuento_vacaciones_licencias` → `descuento_vacaciones`/
+`descuento_licencias`). `tests/test_gui_panel_control.py`: eliminados
+los tests de los cuadritos vacíos y de "siete tarjetas"/"tres filas"
+(de baja), +4 nuevos sobre la tarjeta larga (`test_seis_tarjetas_
+chicas_y_la_tarjeta_larga_quedan_del_mismo_ancho`, `test_tarjeta_larga_
+queda_del_alto_de_sus_tres_hermanas_chicas`, `test_tarjeta_
+estadisticas_principales_tres_subtitulos_en_itálica_y_en_orden`, `test_
+tarjeta_estadisticas_principales_orden_de_las_tres_secciones`), 1
+corregido (`test_hay_una_linea_divisoria_entre_los_dos_botones`, acotado
+a las líneas hijas directas del panel, ya que la tarjeta larga suma sus
+propias tres). `tests/test_gui_balance.py`: encabezados de "Ingresos"
+actualizados, `test_ingresos_recalcula_al_cambiar_periodo` reescrito
+con `emitir_liquidacion` real. Suite completa de los cuatro archivos de
+negocio/GUI tocados: sin regresiones nuevas (ver CLAUDE.md, "Fallos
+conocidos del sandbox/contenedor" para los ~10 fallos preexistentes
+ajenos a esta ronda). pyflakes limpio en los ocho archivos tocados.
+
+## Panel de control ("Estadísticas principales mes en curso"): subtítulos subrayados, totales en itálica, línea en blanco; bug real — aisladas cargadas en fecha de feriado
+
+Cuatro pedidos puntuales de la clienta sobre el cuadro largo recién
+armado en la ronda anterior:
+
+- Los tres subtítulos de sección (`_subtitulo_italica`) suman
+  subrayado además de la itálica que ya tenían
+  (`"font-style: italic; text-decoration: underline;"`).
+- Los tres totales ("Total liquidado mes en curso"/"Balance del
+  negocio"/"Monto restante del mes a cobrar") pasan de negrita a
+  itálica SIN subrayar (`"font-style: italic;"`) — corrección explícita
+  de la ronda anterior, donde habían quedado en negrita.
+- Una línea en blanco (`addSpacing(12)`, mismo valor ya usado entre
+  las otras dos secciones) antes del primer subtítulo ("Liquidaciones
+  mes en curso").
+
+**Bug real encontrado, investigado antes de tocar nada**: la clienta
+reportó que "Feriados trabajados" le daba 0 aunque una profesional (R60
+Julieta Battaglia) le avisó que iba a trabajar un feriado descontado —
+"en el PDF se incluyó como horas aisladas". Investigado con grep antes
+de asumir nada: existe una tabla `FeriadoTrabajado` y todo el cálculo
+en `calcular_liquidacion` para ese concepto (`_calcular_feriados_
+trabajados`), pero NINGÚN formulario del sistema la usa — no hay
+ninguna pantalla para cargar un "feriado trabajado" de verdad. Por eso
+la clienta, sin otra alternativa, cargó esas horas como una
+`ReservaAislada` en la fecha del feriado — correcta para que se le
+pague, pero mal clasificada: el PDF la muestra como "hora aislada" y
+este cuadrito la contaba en "Reservas aisladas" en vez de "Feriados
+trabajados".
+
+Pedido explícito de la clienta, acotado por ella misma a la sumatoria
+de este cuadrito ("ese concepto es el que se tendría que tomar en
+cuenta a la hora de la sumatoria en el cuadro este que te estoy
+diciendo"): NO se tocó `calcular_liquidacion` ni el PDF ni los mensajes
+(sigue viéndose "hora aislada" ahí, sin cambios en esta ronda — ver
+`docs/historial/liquidaciones.md` para la ronda posterior que sí
+diferenció el texto del PDF) — se acotó la reclasificación a
+`_desglose_liquidaciones_periodo` (`app/negocio/panel_control.py`).
+Cada ítem de `aisladas_mes_anterior`/`aisladas_mes_en_curso` cuya
+`fecha` cae en un feriado nacional/día no laborable activo
+(`es_feriado_relevante`, `app.negocio.feriados` — mismo criterio que ya
+usa el descuento de feriados en la liquidación real) suma a
+`feriados_trabajados` en vez de a `aisladas_en_liquidaciones`; el total
+del cuadrito (`DesgloseLiquidaciones.total`) no cambia, solo a qué
+línea va cada monto, así que sigue cerrando exacto contra `Liquidacion.
+monto_generado`.
+
+Tests: `tests/test_gui_panel_control.py` — reescritos `test_tarjeta_
+estadisticas_principales_tres_subtitulos_en_itálica_subrayados_y_en_
+orden` (antes sin el subrayado) y `test_tarjeta_estadisticas_
+principales_los_tres_totales_van_en_italica_sin_subrayar` (antes
+negrita), +1 nuevo (`test_tarjeta_estadisticas_principales_linea_en_
+blanco_antes_del_primer_subtitulo`). `tests/test_panel_control.py`:
++1 nuevo (`test_desglose_liquidaciones_aislada_cargada_en_fecha_de_
+feriado_cuenta_como_feriado_trabajado`, dos aisladas del mismo
+profesional, una en fecha de feriado y otra no, verificando que cada
+una cae en la línea correcta). pyflakes limpio en los dos archivos de
+negocio/GUI y los dos de test tocados; suites `test_panel_control.py`
+(35 passed) y `test_gui_panel_control.py` (66 passed) sin regresiones.

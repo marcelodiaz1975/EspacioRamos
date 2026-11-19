@@ -631,3 +631,48 @@ final. Tests nuevos en `tests/test_gui_pagos.py`:
 `test_deshacer_ultimo_movimiento_muestra_alerta_final_de_exito`.
 pyflakes limpio, suite completa de `test_gui_pagos.py` sin
 regresiones (86 passed).
+
+## Pagos (Registrar pagos): doble alto de encabezado + reordenar/achicar columnas
+
+Cuatro pedidos puntuales de la clienta sobre la tabla de
+`_PanelRegistrarPago` (`app/gui/pantallas/pagos.py`):
+
+- Encabezados de "Período imputado", "Monto", "Saldo previo", "Nuevo
+  saldo" y "Registro modificado" pasan a dos líneas (`"Período\n
+  imputado"`, etc.) — mismo mecanismo ya usado en Estadísticas:
+  `QHeaderView` agranda solo el alto de la fila de encabezados y angosta
+  la columna a lo que mide la palabra más larga, sin código extra.
+- "Monto", "Saldo previo" y "Nuevo saldo" se achican un 40% respecto al
+  ancho natural (`resizeColumnsToContents()`), calculado sobre la tabla
+  ya con filas cargadas (el ancho natural de una tabla vacía no sirve de
+  referencia).
+- Reorden de columnas: "Saldo previo" y "Nuevo saldo" pasan a estar
+  pegados después de "Monto" (antes del Medio de pago); el resto sigue
+  en el mismo orden relativo.
+- "Registro modificado" también a dos líneas, ancho mínimo.
+
+`_PanelEstadoCuentaPagos` (la otra solapa, "Estado de cuenta") no se
+tocó — el pedido fue puntual de "Registrar pagos".
+
+Tests en `tests/test_gui_pagos.py`: `test_tabla_registrar_pagos_monto_
+saldos_se_achican_un_40_por_ciento` (achicado vs. natural post-carga,
+±1px de tolerancia por redondeo de Qt) y `test_tabla_registrar_pagos_
+encabezados_partidos_en_dos_lineas` (alto de encabezado crece, sin
+asumir un múltiplo exacto). Suite completa de `test_gui_pagos.py` sin
+regresiones (87 tests).
+
+## Pagos (Registrar pagos): ancho de Monto/Saldo previo/Nuevo saldo para que entre "$ 0.000.000,00"
+
+Pedido explícito de la clienta, ronda siguiente a la que las achicó un
+40% del ancho natural (ver más arriba, "doble alto de encabezado..."):
+en vez de un porcentaje relativo al contenido real (que varía según
+los importes cargados), las tres columnas pasan a un ancho FIJO
+calculado para que entre exactamente el texto "$ 0.000.000,00" —medido
+con `QFontMetrics` sobre la fuente real de la tabla más un colchón
+chico (`_TEXTO_MONTO_MAXIMO`/`_PADDING_COLUMNA_MONTO`, `app/gui/
+pantallas/pagos.py`), mismo criterio ya usado en otras pantallas para
+no depender de `resizeColumnsToContents()` cuando se necesita un ancho
+exacto en vez de "lo que mida el contenido actual". Test reescrito:
+`test_tabla_registrar_pagos_monto_saldos_anchas_para_el_formato_
+maximo` (antes comparaba contra el 60% del ancho natural). Suite de
+`test_gui_pagos.py`: 87 passed.

@@ -315,3 +315,43 @@ los encabezados y filas esperados en las dos solapas, cancelar el
 selector no genera nada, la cadena de foco de "Estadísticas varias"
 suma el botón nuevo al final).
 
+
+## Estadísticas: conteo de Localidades corregido + columna Período centrada + anchos a todo el ancho de pantalla
+
+Tres pedidos puntuales de la clienta sobre "Historial general"/
+"Estadísticas varias" (`app/gui/pantallas/estadisticas.py`, `app.
+negocio.estadisticas`):
+
+- **Bug real encontrado**: "Localidades" contaba TODAS las filas de la
+  tabla `Localidad` (`conteo_entidades`, sin alcance), incluyendo las
+  que la clienta usa únicamente para un `InmueblePersonal` (inmueble
+  propio fuera del negocio, sin relación con el espacio — ver su
+  comentario en `schema.sql`) — con 3 Localidades cargadas (1 con el
+  único Edificio del espacio, 2 solo de inmuebles personales) mostraba
+  3 en vez de 1. Se corrige a `COUNT(DISTINCT IdLocalidad) FROM
+  Edificio` (mismo criterio que `balance._localidades_con_algun_
+  edificio`, sin el bucket "Sin localidad" porque acá no es una
+  Localidad real para contar) — `COUNT(DISTINCT ...)` ya descarta los
+  `NULL` solo. Los otros tres conteos (Edificios/Unidades/
+  Consultorios) y las ramas CON alcance (Localidad/Edificio/Unidad/
+  Consultorio puntual) no tenían este problema, no se tocaron.
+- Columna "Período" de las dos tablas centrada (`item_centrado`).
+- Anchos de columna repartidos para aprovechar todo el ancho de
+  pantalla: las 11 columnas (todas de importancia pareja, mismo
+  criterio que `balance._armar_tabla`) ya no quedan al ancho justo de
+  `resizeColumnsToContents()` (que suele dejar un tramo sin usar a la
+  derecha del panel) — se reparte el sobrante en partes iguales entre
+  las 11 (`_ajustar_columnas`, nueva). Reusa `_TablaConAnchoDinamico`
+  (`app.gui.pantallas.imagenes`, import cruzado) para recalcular cada
+  vez que la tabla cambia de tamaño (al construirse y al redimensionar
+  la ventana), no solo una vez al cargar datos.
+
+Tests: `tests/test_estadisticas.py` (+1: `conteo_entidades` con el
+caso real de la clienta, 3 Localidades → 1); `tests/test_gui_
+estadisticas.py` (+2: columna Período centrada en las dos tablas,
+anchos repartidos hasta el ancho del viewport). Suite: 18 + 26 passed,
+más 125 passed en la corrida conjunta con `test_estadisticas_pantalla.
+py`/`test_gui_imagenes.py` (confirma que el import cruzado de
+`_TablaConAnchoDinamico` no rompe nada). pyflakes limpio en `app/
+negocio/estadisticas.py`, `app/gui/pantallas/estadisticas.py` y los
+dos archivos de test.

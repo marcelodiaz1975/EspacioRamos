@@ -1015,3 +1015,37 @@ Test nuevo en `tests/test_gui_liquidacion.py`:
 pantalla`. Verificado visualmente con captura offscreen. Suite completa
 de `test_gui_liquidacion.py`: 70 passed.
 
+
+## PDF de liquidación: aclaración de feriado en el texto de horas aisladas
+
+Consulta de la clienta: "cuando se reservan horas aisladas en días
+feriados a profesionales que reservan horarios en esos días quiero que
+diga 'Horas aisladas a trabajar en feriado del...' o 'Horas aisladas
+trabajadas en feriado del...'... que agregue lo de feriado al texto
+preestablecido." (Ver `docs/historial/sistema.md`, ronda "Panel de
+control... subtítulos subrayados... bug real — aisladas cargadas en
+fecha de feriado" para el contexto completo: la única forma que tiene
+hoy el sistema de registrar un feriado trabajado de verdad es cargarlo
+como una `ReservaAislada` en esa fecha, por falta de GUI para
+`FeriadoTrabajado` — esa ronda anterior acotó el arreglo a la
+sumatoria de un cuadrito de Panel de control nomás, sin tocar el PDF;
+esta ronda es la que extiende la aclaración al texto real que ve el
+profesional. Ver también `docs/historial/profesionales.md` para la
+otra mitad de esta misma ronda de trabajo, el checkbox de "Hora
+liberación".)
+
+`_texto_aislada` (`app/pdf/liquidacion_pdf.py`) ya tenía la firma
+necesaria para esto. Cuando `item.fecha` cae en un feriado relevante
+(`es_feriado_relevante`, mismo criterio ya usado en la reclasificación
+de Panel de control), el prefijo del ítem pasa de "{concepto} en
+{mes}: ..." a "{concepto} en feriado del {DD/MM}: ..." — la fecha
+exacta ya aparece más abajo en la misma línea, así que no hace falta
+repetir también el nombre del mes. Sin ningún feriado en esa fecha, el
+texto sigue exactamente igual que antes.
+
+Tests: `tests/test_pdf_liquidacion.py` (+4 para el feriado en aisladas:
+mes actual, mes anterior, caso sin feriado que no cambia, firma de
+`_items_cuenta`/`_texto_aislada` actualizada con `conn` en los ~20
+tests preexistentes que las llamaban). Suite: 52 passed. pyflakes
+limpio en `app/pdf/liquidacion_pdf.py` y `tests/test_pdf_
+liquidacion.py`.
