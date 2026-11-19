@@ -993,16 +993,17 @@ class _PanelCargaControl(QWidget):
         # de arriba — necesitan su ancho real para no cortar el texto.
         for columna in (self._COL_EDITAR, self._COL_ABONAR, self._COL_ARCHIVAR, self._COL_DESHACER):
             self.tabla.resizeColumnToContents(columna)
-        # "Cuenta/Id" al ancho de "Categoría" menos un 25%; "Importe" un
-        # 20% más ancho que su ancho natural, menos un 20% — pedido
-        # explícito de la clienta (una ronda sobre la otra: antes era
-        # "Cuenta/Id" = "Categoría" e "Importe" = natural*1.2, ver
-        # CLAUDE.md). El ancho que se libera lo absorben solas Nombre/
-        # Afectación (`Stretch`, sin cálculo manual — ver `_armar_ui`).
+        # "Cuenta/Id" al ancho de "Categoría" menos un 25% (ver CLAUDE.md).
+        # "Importe" pasa de un % relativo a su ancho natural (que varía
+        # según los importes cargados) a un ancho FIJO calculado para
+        # que entre el texto "$ 0.000.000,00" — pedido explícito de la
+        # clienta, mismo criterio que `_TEXTO_IMPORTE_MAXIMO` de
+        # "Historial" (`_PanelHistorialControlPagos`, más abajo). El
+        # ancho que esto libera lo absorben solas Nombre/Afectación
+        # (`Stretch`, sin cálculo manual — ver `_armar_ui`).
         self.tabla.setColumnWidth(self._COL_CUENTA_ID, round(self.tabla.columnWidth(self._COL_CATEGORIA) * 0.75))
-        self.tabla.resizeColumnToContents(self._COL_IMPORTE)
-        ancho_importe = round(self.tabla.columnWidth(self._COL_IMPORTE) * 1.2)
-        self.tabla.setColumnWidth(self._COL_IMPORTE, round(ancho_importe * 0.8))
+        ancho_importe = QFontMetrics(self.tabla.font()).horizontalAdvance(_TEXTO_IMPORTE_MAXIMO)
+        self.tabla.setColumnWidth(self._COL_IMPORTE, ancho_importe + _PADDING_COLUMNA_IMPORTE)
         self._actualizar_botones_seleccion()
         self._actualizar_etiquetas_conteo(colores_fila, filas)
 

@@ -763,20 +763,22 @@ def test_tabla_carga_control_cuenta_id_despues_de_afectacion_y_ancho_25_por_cien
     assert abs(panel.tabla.columnWidth(panel._COL_CUENTA_ID) - ancho_esperado) <= 1
 
 
-def test_tabla_carga_control_importe_un_20_por_ciento_mas_ancho_menos_un_20_por_ciento(qtbot, conn, unidad):
+def test_tabla_carga_control_importe_ancho_para_el_formato_maximo(qtbot, conn, unidad):
     """Pedido explícito de la clienta (ronda siguiente a la que fijó
-    "Importe" un 20% más ancho que su ancho natural): ese ancho se
-    reduce un 20% más."""
+    "Importe" en un % relativo a su ancho natural): en vez de un
+    porcentaje relativo al contenido real (que varía según los importes
+    cargados), pasa a un ancho FIJO calculado para que entre "$
+    0.000.000,00" — mismo criterio que `_TEXTO_IMPORTE_MAXIMO` de
+    "Historial"."""
+    from PySide6.QtGui import QFontMetrics
+
     pantalla = PantallaControlPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_carga_control
     _crear_concepto_unidad(panel, unidad)
-    ancho_achicado = panel.tabla.columnWidth(panel._COL_IMPORTE)
 
-    panel.tabla.resizeColumnToContents(panel._COL_IMPORTE)
-
-    ancho_esperado = round(round(panel.tabla.columnWidth(panel._COL_IMPORTE) * 1.2) * 0.8)
-    assert abs(ancho_achicado - ancho_esperado) <= 1
+    ancho_esperado = QFontMetrics(panel.tabla.font()).horizontalAdvance("$ 0.000.000,00") + 10
+    assert panel.tabla.columnWidth(panel._COL_IMPORTE) == ancho_esperado
 
 
 def test_boton_deshacer_deshabilitado_sin_datos_habilitado_con_datos(qtbot, conn, unidad):
