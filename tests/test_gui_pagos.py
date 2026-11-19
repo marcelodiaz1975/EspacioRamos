@@ -222,11 +222,13 @@ def test_tabla_registrar_pagos_periodo_imputado_registro_modificado_y_es_ajuste_
     assert panel.tabla.item(0, 9).textAlignment() == Qt.AlignmentFlag.AlignCenter  # Es ajuste
 
 
-def test_tabla_registrar_pagos_monto_saldos_se_achican_un_40_por_ciento(qtbot, conn):
+def test_tabla_registrar_pagos_monto_saldos_anchas_para_el_formato_maximo(qtbot, conn):
     """Pedido explícito de la clienta: "Monto"/"Saldo previo"/"Nuevo
-    saldo" se achican un 40% de su ancho natural (ya no quedan al mismo
-    ancho que "Registro modificado", que ahora va solo al mínimo gracias
-    al encabezado partido en dos líneas)."""
+    saldo" anchas justo para que entre un importe con el formato
+    "$ 0.000.000,00" — ni más corto (se cortaría un importe grande) ni
+    más largo (desperdicia ancho)."""
+    from PySide6.QtGui import QFontMetrics
+
     id_profesional = _crear_profesional(conn, saldo=10000)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
@@ -234,18 +236,11 @@ def test_tabla_registrar_pagos_monto_saldos_se_achican_un_40_por_ciento(qtbot, c
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(500)
     panel._registrar()
-    ancho_achicado_monto = panel.tabla.columnWidth(3)
-    ancho_achicado_saldo_previo = panel.tabla.columnWidth(4)
-    ancho_achicado_nuevo_saldo = panel.tabla.columnWidth(5)
 
-    # mismas filas, mismo contenido: recalcular el ancho natural (sin
-    # el achique del 40%) tiene que dar, redondeado (±1px por posibles
-    # redondeos internos de Qt), el ancho de antes.
-    panel.tabla.resizeColumnsToContents()
-
-    assert abs(ancho_achicado_monto - round(panel.tabla.columnWidth(3) * 0.6)) <= 1
-    assert abs(ancho_achicado_saldo_previo - round(panel.tabla.columnWidth(4) * 0.6)) <= 1
-    assert abs(ancho_achicado_nuevo_saldo - round(panel.tabla.columnWidth(5) * 0.6)) <= 1
+    ancho_esperado = QFontMetrics(panel.tabla.font()).horizontalAdvance("$ 0.000.000,00") + 10
+    assert panel.tabla.columnWidth(3) == ancho_esperado
+    assert panel.tabla.columnWidth(4) == ancho_esperado
+    assert panel.tabla.columnWidth(5) == ancho_esperado
 
 
 def test_tabla_registrar_pagos_encabezados_partidos_en_dos_lineas(qtbot, conn):

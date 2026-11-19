@@ -16,7 +16,7 @@ import sqlite3
 from datetime import datetime
 
 from PySide6.QtCore import QDateTime, QLocale, Qt, QTimer
-from PySide6.QtGui import QColor, QGuiApplication, QValidator
+from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QValidator
 from PySide6.QtWidgets import (
     QComboBox,
     QDateTimeEdit,
@@ -89,6 +89,15 @@ _CATEGORIA_R = ("R",)
 _CATEGORIAS_CON_PAGOS = ("R", "A", "E", "X")
 _ANCHO_COMBO_PROFESIONAL = 220
 _ANCHO_COL_PROFESIONAL = 180
+
+# Pedido explícito de la clienta: "Monto"/"Saldo previo"/"Nuevo saldo"
+# anchas para que entre un importe con este formato y esta cantidad de
+# caracteres, sin cortarse ni sobrar — se mide con `QFontMetrics` sobre
+# la fuente real de la tabla (mismo criterio que `reservas._ajustar_
+# columnas`/`_PADDING_AJUSTE_MINIMO_AISLADAS`), no con `resizeColumnsTo
+# Contents()` (que mide el contenido real, casi siempre más corto).
+_TEXTO_MONTO_MAXIMO = "$ 0.000.000,00"
+_PADDING_COLUMNA_MONTO = 10
 
 
 def _linea_divisoria() -> QFrame:
@@ -582,13 +591,13 @@ class _PanelRegistrarPago(QWidget):
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(1, max(self.tabla.columnWidth(1), _ANCHO_COL_PROFESIONAL))
         # Pedido explícito de la clienta: "Monto"/"Saldo previo"/"Nuevo
-        # saldo" se achican un 40% respecto del ancho natural que ya les
-        # dio `resizeColumnsToContents()` — "Período imputado"/"Registro
-        # modificado" no necesitan este paso: ya quedan al mínimo solos,
-        # por el "\n" de sus encabezados (ver `_armar_ui`).
+        # saldo" anchas justo para que entre "$ 0.000.000,00" — "Período
+        # imputado"/"Registro modificado" no necesitan este paso: ya
+        # quedan al mínimo solos, por el "\n" de sus encabezados (ver
+        # `_armar_ui`).
+        ancho_monto = QFontMetrics(self.tabla.font()).horizontalAdvance(_TEXTO_MONTO_MAXIMO) + _PADDING_COLUMNA_MONTO
         for columna in (3, 4, 5):
-            ancho_natural = self.tabla.columnWidth(columna)
-            self.tabla.setColumnWidth(columna, round(ancho_natural * 0.6))
+            self.tabla.setColumnWidth(columna, ancho_monto)
         self._actualizar_tanda()
         self._actualizar_saldos()
         self._actualizar_botones()

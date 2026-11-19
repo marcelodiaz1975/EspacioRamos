@@ -592,3 +592,18 @@ asignado`. pyflakes limpio en los cuatro archivos tocados
 `tests/test_panel_control.py`, `tests/test_gui_panel_control.py`);
 suite completa de los dos archivos de test: 94 passed.
 
+## Pagos (Registrar pagos): ancho de Monto/Saldo previo/Nuevo saldo para que entre "$ 0.000.000,00"
+
+Pedido explícito de la clienta, ronda siguiente a la que las achicó un
+40% del ancho natural (ver más arriba, "doble alto de encabezado..."):
+en vez de un porcentaje relativo al contenido real (que varía según
+los importes cargados), las tres columnas pasan a un ancho FIJO
+calculado para que entre exactamente el texto "$ 0.000.000,00" —medido
+con `QFontMetrics` sobre la fuente real de la tabla más un colchón
+chico (`_TEXTO_MONTO_MAXIMO`/`_PADDING_COLUMNA_MONTO`, `app/gui/
+pantallas/pagos.py`), mismo criterio ya usado en otras pantallas para
+no depender de `resizeColumnsToContents()` cuando se necesita un ancho
+exacto en vez de "lo que mida el contenido actual". Test reescrito:
+`test_tabla_registrar_pagos_monto_saldos_anchas_para_el_formato_
+maximo` (antes comparaba contra el 60% del ancho natural). Suite de
+`test_gui_pagos.py`: 87 passed.
