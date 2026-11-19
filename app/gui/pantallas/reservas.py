@@ -2088,6 +2088,16 @@ class _PanelReservasRegulares(QWidget):
             f"Vigencia: desde {self.campo_vigencia_inicio.date().toString('dd-MM-yyyy')} hasta {vigencia_fin_texto}",
         ]):
             return
+        periodo = periodo_actual(self.conn)
+        # Bug real reportado por la clienta: sumar un horario NUEVO con
+        # Vigencia desde el mes que viene (una "incorporación" para el
+        # próximo período, no un cambio de este mes) regeneraba y
+        # marcaba "no enviada" la liquidación del período EN CURSO sin
+        # que cambiara un centavo — a diferencia de `_modificar_
+        # seleccionada` (ver `_afecta_economicamente_el_periodo_actual`),
+        # `_crear` nunca tuvo este guard. Capturado ANTES de crear,
+        # mismo criterio exacto que esa otra función.
+        total_antes = _total_liquidacion_del_periodo(self.conn, id_profesional, periodo)
         advertencias_totales: list[str] = []
         algun_dia_creado = False
         for dia in dias:
@@ -2102,7 +2112,8 @@ class _PanelReservasRegulares(QWidget):
         else:
             # Punto #9.1.9: alerta final de éxito.
             QMessageBox.information(self, "Reserva creada", "Reserva cargada con éxito.")
-        regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo_actual(self.conn))
+        if _afecta_economicamente_el_periodo_actual(self.conn, id_profesional, periodo, total_antes):
+            regenerar_si_corresponde(self.conn, id_profesional=id_profesional, periodo=periodo)
         self.conn.commit()
         self.actualizar()
         if self._cola_precarga_pedido:
@@ -2241,6 +2252,14 @@ class _PanelReservasRegulares(QWidget):
         )
         if confirmacion != QMessageBox.StandardButton.Yes:
             return
+        periodo = periodo_actual(self.conn)
+        # Mismo guard que `_crear`/`_modificar_seleccionada` (bug real
+        # reportado por la clienta): eliminar una reserva cuya Vigencia
+        # todavía no alcanzó el mes en curso (ej. una incorporación para
+        # el mes que viene, dada de baja antes de que empiece a correr)
+        # no tiene que regenerar/marcar "no enviada" la liquidación de
+        # ESTE período si su total no cambia. Capturado ANTES de borrar.
+        total_antes = _total_liquidacion_del_periodo(self.conn, reserva["IdProfesional"], periodo)
         try:
             eliminar_reserva_regular(self.conn, reserva["IdReservaRegular"])
         except ValueError as error:
@@ -2249,9 +2268,8 @@ class _PanelReservasRegulares(QWidget):
         # Punto #9.1.9: cualquiera de los tres botones (Crear/Modificar/
         # Eliminar) que toque el período en curso regenera y marca no
         # enviada la liquidación del profesional afectado.
-        regenerar_si_corresponde(
-            self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo_actual(self.conn),
-        )
+        if _afecta_economicamente_el_periodo_actual(self.conn, reserva["IdProfesional"], periodo, total_antes):
+            regenerar_si_corresponde(self.conn, id_profesional=reserva["IdProfesional"], periodo=periodo)
         self.conn.commit()
         QMessageBox.information(self, "Eliminar reserva", "Reserva eliminada con éxito.")
         self.actualizar()

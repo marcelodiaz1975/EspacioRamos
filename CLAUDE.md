@@ -1476,3 +1476,77 @@ avance_mes.py`/`test_catalogos.py` (los 3 fallos de `test_avance_mes.py`
 son los conocidos por el reloj real del sandbox, ajenos a esta ronda).
 pyflakes limpio en los cuatro archivos tocados.
 
+
+## Reservas regulares: no regenerar la liquidación del período actual al crear/eliminar un horario con Vigencia futura
+
+Pedido de la clienta, con una corrección propia a mitad de camino.
+Versión original:
+
+> "Cuando cargo una reserva aislada dentro del mes en curso a imputar en
+> el mes siguiente a un profesional categoría R con reserva regular
+> activa, me marca en el centro de mensajería como que tengo que
+> enviar de nuevo la liquidación, como que no está enviada. No regenera
+> el archivo, eso está bien por que el cargo pasa para el próximo
+> período, pero hay que hacer esta corrección porque la liquidación del
+> mes vigente es la misma y no hace falta volver a enviar."
+
+Investigado a fondo (scripts de reproducción a nivel negocio y a nivel
+GUI completo, con el escenario EXACTO narrado) sin lograr reproducir
+ningún bug con una `ReservaAislada` — se reportó honestamente el
+resultado de la investigación en vez de asumir una causa. La clienta
+corrigió su propio reporte:
+
+> "No, me equivoqué en una cosa, no es una hora aislada lo que se
+> agregó, sino una hora regular que se agrega a partir del próximo mes
+> a un profesional que tiene horas regulares activas, antes reservaba
+> desde las 14hs, ahora lo va a hacer desde las 13hs a partir del mes
+> que viene. Me regeneró la liquidación sin ningún cambio, y me la
+> marcó en verde y como no enviada en el centro de mensajería."
+
+**Causa real**: la tarea #32 (ver más abajo en el historial) ya había
+armado el guard `_afecta_economicamente_el_periodo_actual` (compara el
+total de la liquidación del período ANTES vs. DESPUÉS de la operación,
+y solo llama a `regenerar_si_corresponde` si de verdad cambió) y lo
+aplicó a `_modificar_seleccionada` de `_PanelReservasRegulares` — pero
+nunca a `_crear` ni a `_eliminar_seleccionada`, que seguían llamando
+`regenerar_si_corresponde` de forma incondicional. Confirmado por
+lectura directa del código, no solo por inferencia: sumar un horario
+NUEVO con `VigenciaInicio` en el mes que viene (una incorporación para
+el próximo período, no un cambio de este mes) no afecta en nada el
+total de la liquidación del mes en curso, pero como `_crear` nunca
+tenía el guard, regeneraba y marcaba "no enviada" la liquidación YA
+ENVIADA de este período igual.
+
+**Arreglo**: `_PanelReservasRegulares._crear()` y
+`._eliminar_seleccionada()` (`app/gui/pantallas/reservas.py`) suman el
+mismo patrón exacto que ya usaba `_modificar_seleccionada` desde la
+tarea #32 — capturar `_total_liquidacion_del_periodo` ANTES de la
+operación, ejecutarla, y solo regenerar si
+`_afecta_economicamente_el_periodo_actual` confirma un cambio real.
+
+Dos tests existentes (`test_crear_reserva_regular_regenera_liquidacion_
+enviada`, `test_eliminar_reserva_regular_regenera_liquidacion_enviada`)
+necesitaron `conn.execute("UPDATE Consultorio SET
+ValorHoraRegularActual = 1000")` tras `_preparar(conn)` — sin un valor
+hora real, crear/eliminar no cambia económicamente nada y el guard
+nuevo, correctamente, deja de regenerar (mismo motivo por el que
+`test_modificar_reserva_regular_regenera_liquidacion_enviada` ya tenía
+ese `UPDATE` desde la tarea #32). Dos tests nuevos reproducen
+directamente el escenario real reportado (horario nuevo con Vigencia
+en el mes próximo, para un profesional R que ya tenía horas regulares
+activas y liquidación "Enviada"): `test_crear_reserva_regular_con_
+vigencia_en_el_mes_proximo_no_regenera_el_periodo_actual` y
+`test_eliminar_reserva_regular_con_vigencia_en_el_mes_proximo_no_
+regenera_el_periodo_actual` — confirman que la liquidación del período
+actual se queda en "Enviada" (no se crea ninguna emisión nueva).
+
+Tests: `tests/test_gui_reservas.py` (+2 nuevos, +2 reescritos con el
+`UPDATE` de arriba). Suite conjunta de `test_gui_reservas.py`/`test_
+reservas.py`/`test_gui_panel_control.py`/`test_panel_control.py`/
+`test_gui_control_pagos.py`/`test_control_pagos.py`: 460 passed, 2
+failed — los 2 fallos son los ya conocidos de calibración de fuentes
+del sandbox en Reservas (`test_botones_de_accion_quedan_compactos_
+con_su_color`, `test_botones_de_aisladas_quedan_igual_de_compactos_
+que_los_de_regulares`, ver "Fallos conocidos del sandbox/contenedor"
+más arriba), ajenos a esta ronda. pyflakes limpio en `app/gui/
+pantallas/reservas.py` y `tests/test_gui_reservas.py`.

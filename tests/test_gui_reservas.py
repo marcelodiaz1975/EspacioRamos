@@ -1611,8 +1611,14 @@ def test_crear_reserva_regular_con_conflicto_pide_confirmacion_y_fuerza(qtbot, c
 def test_crear_reserva_regular_regenera_liquidacion_enviada(qtbot, conn):
     """DC-08 §3.7: cargar una reserva regular tiene que regenerar sola la
     liquidación del período en curso si ya estaba Enviada, dejándola
-    marcada como pendiente de reenvío."""
+    marcada como pendiente de reenvío — siempre que afecte
+    económicamente ese período (ver `_afecta_economicamente_el_periodo_
+    actual`, también aplicado a `_crear` desde esta ronda): necesita un
+    valor hora real en el consultorio, igual que `test_modificar_
+    reserva_regular_regenera_liquidacion_enviada`, porque la Vigencia
+    por defecto (primer día del mes en curso) ya cubre este período."""
     _preparar(conn)
+    conn.execute("UPDATE Consultorio SET ValorHoraRegularActual = 1000")
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     periodo = periodo_actual(conn)
     emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
@@ -1761,8 +1767,13 @@ def test_eliminar_reserva_regular_cancelada_por_el_usuario_no_borra_nada(qtbot, 
 
 
 def test_eliminar_reserva_regular_regenera_liquidacion_enviada(qtbot, conn):
-    """Punto #9.1.9 aplicado a "Eliminar reserva"."""
+    """Punto #9.1.9 aplicado a "Eliminar reserva" — necesita un valor
+    hora real (mismo motivo que `test_crear_reserva_regular_regenera_
+    liquidacion_enviada`): sin eso, borrar la reserva no cambia el total
+    del período (ya era $0) y el guard de `_afecta_economicamente_el_
+    periodo_actual` con razón no regeneraría nada."""
     _preparar(conn)
+    conn.execute("UPDATE Consultorio SET ValorHoraRegularActual = 1000")
     id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
     periodo = periodo_actual(conn)
     pantalla = PantallaReservas(conn)
@@ -1782,6 +1793,111 @@ def test_eliminar_reserva_regular_regenera_liquidacion_enviada(qtbot, conn):
     emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
     ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
     assert ultima["EstadoEnvio"] == "Regenerada no enviada"
+
+
+def test_crear_reserva_regular_con_vigencia_en_el_mes_proximo_no_regenera_el_periodo_actual(qtbot, conn):
+    """Bug real reportado por la clienta, versión corregida de su propio
+    reporte original ("me equivoqué en una cosa, no es una hora
+    aislada... sino una hora regular que se agrega a partir del próximo
+    mes a un profesional que tiene horas regulares activas, antes
+    reservaba desde las 14hs, ahora lo va a hacer desde las 13hs a
+    partir del mes que viene. Me regeneró la liquidación sin ningún
+    cambio, y me la marcó en verde y como no enviada en el centro de
+    mensajería") — sumar una reserva regular NUEVA cuya `VigenciaInicio`
+    recién arranca el mes que viene no tiene que regenerar ni marcar "no
+    enviada" la liquidación YA EMITIDA del mes EN CURSO, porque ese
+    cargo nuevo no le suma ni le resta nada al total de este período.
+    `_crear` nunca tuvo el guard que ya usaba `_modificar_seleccionada`
+    desde la tarea #32 (`_afecta_economicamente_el_periodo_actual`) —
+    arreglado en esta ronda aplicándole el mismo patrón."""
+    from app.negocio.dias import sumar_meses
+
+    _preparar(conn)
+    conn.execute("UPDATE Consultorio SET ValorHoraRegularActual = 1000")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    periodo = periodo_actual(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    # El profesional YA tiene horas regulares activas este mes (Lunes
+    # 9-10hs, vigencia desde el día 1 del mes actual — default del
+    # formulario) antes de sumar nada nuevo.
+    panel._crear()
+
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+    emitidas_antes = len(
+        obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    )
+
+    # La "incorporación" real de la clienta: otro horario (otro día, para
+    # no chocar con el ya creado) con Vigencia recién desde el mes que
+    # viene.
+    anio_prox, mes_prox = (int(p) for p in sumar_meses(periodo, 1).split("-"))
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel._checks_dia["Lunes"].setChecked(False)
+    panel._checks_dia["Martes"].setChecked(True)
+    panel.spin_desde.setValue(13)
+    panel.spin_hasta.setValue(14)
+    panel.campo_vigencia_inicio.setDate(QDate(anio_prox, mes_prox, 1))
+    panel._crear()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 2
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == emitidas_antes
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Enviada"
+
+
+def test_eliminar_reserva_regular_con_vigencia_en_el_mes_proximo_no_regenera_el_periodo_actual(qtbot, conn):
+    """Mismo guard que el test anterior, aplicado a `_eliminar_
+    seleccionada`: borrar una reserva cuya Vigencia todavía no alcanzó
+    el mes en curso (ej. una incorporación para el mes que viene, dada
+    de baja antes de que empiece a correr) no tiene que regenerar la
+    liquidación de ESTE período — ese cargo nunca llegó a sumarle nada,
+    así que borrarlo tampoco le resta nada."""
+    from app.negocio.dias import sumar_meses
+
+    _preparar(conn)
+    conn.execute("UPDATE Consultorio SET ValorHoraRegularActual = 1000")
+    conn.commit()
+    id_profesional = conn.execute("SELECT IdProfesional FROM Profesional").fetchone()["IdProfesional"]
+    periodo = periodo_actual(conn)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_regulares
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel._crear()  # reserva activa este mes (Lunes 9-10)
+
+    anio_prox, mes_prox = (int(p) for p in sumar_meses(periodo, 1).split("-"))
+    panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
+    panel._checks_dia["Lunes"].setChecked(False)
+    panel._checks_dia["Martes"].setChecked(True)
+    panel.spin_desde.setValue(13)
+    panel.spin_hasta.setValue(14)
+    panel.campo_vigencia_inicio.setDate(QDate(anio_prox, mes_prox, 1))
+    panel._crear()  # reserva futura, sin efecto en el período actual
+
+    emitir_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_profesional, periodo=periodo, enviada=True)
+    conn.commit()
+    emitidas_antes = len(
+        obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    )
+
+    vigencia_futura = QDate(anio_prox, mes_prox, 1).toPython().isoformat()
+    fila_futura = next(i for i, r in enumerate(panel._reservas) if r["VigenciaInicio"] == vigencia_futura)
+    panel.tabla.selectRow(fila_futura)
+    panel._eliminar_seleccionada()
+
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaRegular").fetchone()["c"] == 1
+    emisiones = obtener_repositorio(conn, "LiquidacionEmitida").listar(IdProfesional=id_profesional, Periodo=periodo)
+    assert len(emisiones) == emitidas_antes
+    ultima = max(emisiones, key=lambda f: f["IdLiquidacion"])
+    assert ultima["EstadoEnvio"] == "Enviada"
 
 
 def test_tecla_delete_en_regulares_elimina_la_reserva(qtbot, conn):
