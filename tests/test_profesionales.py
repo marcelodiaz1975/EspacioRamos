@@ -147,6 +147,36 @@ def test_nuevo_profesional_sugiere_codigo_de_la_categoria_por_defecto(qtbot, con
     assert dialogo._entradas["IdCodigo"].text() == "R1"
 
 
+def test_ocultar_hora_liberacion_pdf_arranca_destildado_en_un_alta_nueva(qtbot, conn):
+    """Pedido explícito de la clienta: "por defecto que se vea la hora
+    real" — el checkbox nuevo arranca SIN marcar (hora real visible en
+    el PDF) para un profesional recién creado."""
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    assert dialogo._entradas["OcultarHoraLiberacionPdf"].isChecked() is False
+    assert dialogo.valores()["OcultarHoraLiberacionPdf"] == 0
+
+
+def test_ocultar_hora_liberacion_pdf_se_guarda_al_tildarlo(qtbot, conn):
+    """Pedido explícito de la clienta: "si pongo el check activo esa
+    diferencia [ocultar la hora real] a aplicar en el PDF" — el valor
+    tildado se persiste como cualquier otro campo del CRUD genérico."""
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    dialogo._entradas["OcultarHoraLiberacionPdf"].setChecked(True)
+    assert dialogo.valores()["OcultarHoraLiberacionPdf"] == 1
+
+
+def test_editar_profesional_con_ocultar_hora_liberacion_cargado_precarga_tildado(qtbot, conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Gómez", OcultarHoraLiberacionPdf=1,
+    )
+    pantalla = _PanelProfesionales(conn)
+    qtbot.addWidget(pantalla)
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, pantalla.crud_profesionales.campos, "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    assert dialogo._entradas["OcultarHoraLiberacionPdf"].isChecked() is True
+
+
 def test_tratamiento_ofrece_los_ya_usados_aunque_la_profesion_no_tenga_desplegable(qtbot, conn):
     """Bug reportado por la clienta ("no despliega el menú de los
     tratamientos"): `opciones_tratamiento` solo devuelve algo para

@@ -37,7 +37,7 @@ from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 
 from app.negocio.dias import DIAS_SEMANA, fecha_actual, parsear_periodo, primer_dia_mes, ultimo_dia_mes
-from app.negocio.feriados import feriados_relevantes_periodo
+from app.negocio.feriados import es_feriado_relevante, feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, fecha_larga, hora_fmt, mes_texto, periodo_mm_aaaa
 from app.negocio.liquidaciones import Liquidacion, ids_consolidados
 from app.negocio.formato import decimales_configurados, decimales_total_liquidacion, formatear_moneda
@@ -198,11 +198,17 @@ def _edificios_para_valores(conn: sqlite3.Connection, edificios_reservados: dict
     return sorted(resultado.values(), key=lambda info: info["NombreEdificio"])
 
 
-def _tabla_bloques_horarios(bloques: list[sqlite3.Row], ancho: float) -> Table:
+def _tabla_bloques_horarios(bloques: list[sqlite3.Row], ancho: float, ocultar_hora_liberacion: bool = False) -> Table:
     filas = [["Edificio", "Día", "Hora inicio", "Hora liberación", "Unidad", "Consultorio", "Vigencia desde", "Vigencia hasta"]]
     for b in bloques:
+        # Pedido explícito de la clienta ("por defecto que se vea la hora
+        # real, si pongo el check activo esa diferencia a aplicar en el
+        # PDF"): el PDF es siempre de UN solo profesional (el titular de
+        # la liquidación), así que un único flag alcanza para todos los
+        # bloques de esta tabla (ver `Profesional.OcultarHoraLiberacionPdf`).
+        texto_hora_liberacion = "-" if ocultar_hora_liberacion else hora_fmt(b["HoraFin"])
         filas.append([
-            b["NombreEdificio"], b["DiaSemana"], hora_fmt(b["HoraInicio"]), hora_fmt(b["HoraFin"]),
+            b["NombreEdificio"], b["DiaSemana"], hora_fmt(b["HoraInicio"]), texto_hora_liberacion,
             b["Departamento"], str(b["NumeroConsultorio"]),
             fecha_larga(b["VigenciaInicio"]), fecha_larga(b["VigenciaFin"]),
         ])
@@ -246,7 +252,8 @@ def _texto_feriado_trabajado_anterior(consultorios: dict, item, mes_ant_texto: s
 
 
 def _texto_aislada(
-    consultorios: dict, item, verbo: str, mes_texto_opt: str | None, mostrar_edificio: bool = True,
+    conn: sqlite3.Connection, consultorios: dict, item, verbo: str, mes_texto_opt: str | None,
+    mostrar_edificio: bool = True,
 ) -> str:
     dia_semana = DIAS_SEMANA[date.fromisoformat(item.fecha).weekday()]
     # Una Reserva extraordinaria (#38, segunda vuelta) no es una hora
@@ -257,7 +264,19 @@ def _texto_aislada(
     # "Hora aislada" fijo sin importar la duración real del bloque.
     palabra = "Horas aisladas" if (item.hora_fin - item.hora_inicio) > 1 else "Hora aislada"
     concepto = getattr(item, "item_extraordinario", None) or f"{palabra} {verbo}"
-    prefijo = f"{concepto} en {mes_texto_opt}: " if mes_texto_opt else f"{concepto}: "
+    # Pedido explícito de la clienta: cuando la aislada cae en un día
+    # feriado/no laborable (la única alternativa que tiene el sistema
+    # hoy para cargar un "feriado trabajado" de verdad, ver CLAUDE.md
+    # "Panel de control: ... bug real — aisladas cargadas en fecha de
+    # feriado"), el texto lo aclara en vez de solo decir en qué mes
+    # cae — la fecha exacta sigue apareciendo más abajo en la misma
+    # línea, así que no hace falta repetir también el nombre del mes.
+    if es_feriado_relevante(conn, item.fecha):
+        prefijo = f"{concepto} en feriado del {fecha_corta(item.fecha)}: "
+    elif mes_texto_opt:
+        prefijo = f"{concepto} en {mes_texto_opt}: "
+    else:
+        prefijo = f"{concepto}: "
     return (
         f"{prefijo}{dia_semana.lower()} {fecha_corta(item.fecha)} "
         f"de {hora_fmt(item.hora_inicio)[:-2]} a {hora_fmt(item.hora_fin)} "
@@ -266,7 +285,7 @@ def _texto_aislada(
 
 
 def _items_cuenta(
-    liquidacion: Liquidacion, consultorios: dict, tipos_feriado_actual: dict[str, str],
+    conn: sqlite3.Connection, liquidacion: Liquidacion, consultorios: dict, tipos_feriado_actual: dict[str, str],
     mes_actual_texto: str, mes_anterior_texto: str, mostrar_edificio: bool = True,
 ) -> list[tuple[str, float, bool]]:
     """(concepto, importe, es_subtotal) — DC-01 §1.10, con la redacción del
@@ -370,12 +389,14 @@ def _items_cuenta(
         ))
     for item in liquidacion.aisladas_mes_anterior:
         eventos_con_fecha.append((
-            item.fecha, _texto_aislada(consultorios, item, "trabajada", mes_anterior_texto, mostrar_edificio),
+            item.fecha,
+            _texto_aislada(conn, consultorios, item, "trabajada", mes_anterior_texto, mostrar_edificio),
             item.monto,
         ))
     for item in liquidacion.aisladas_mes_en_curso:
         eventos_con_fecha.append((
-            item.fecha, _texto_aislada(consultorios, item, "a trabajar", mes_actual_texto, mostrar_edificio),
+            item.fecha,
+            _texto_aislada(conn, consultorios, item, "a trabajar", mes_actual_texto, mostrar_edificio),
             item.monto,
         ))
     # `sorted` es estable: entre eventos de la misma fecha exacta
@@ -677,7 +698,8 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
     mostrar_edificio = len(ids_edificio_lugares) > 1
 
     items = _items_cuenta(
-        liquidacion, consultorios, tipos_feriado_actual, mes_actual_texto, mes_anterior_texto, mostrar_edificio,
+        conn, liquidacion, consultorios, tipos_feriado_actual, mes_actual_texto, mes_anterior_texto,
+        mostrar_edificio,
     )
     # El "valor con descuento" de cada consultorio es un valor final "en
     # vivo" (igual que feriados trabajados u horas agregadas): si se pierde
@@ -729,7 +751,7 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         story.append(encabezado(2, "Bloques de horarios regulares reservados", ancho))
         story.append(Spacer(1, 6))
         if bloques:
-            story.append(_tabla_bloques_horarios(bloques, ancho))
+            story.append(_tabla_bloques_horarios(bloques, ancho, bool(profesional["OcultarHoraLiberacionPdf"])))
         else:
             story.append(Paragraph("Sin bloques horarios regulares vigentes.", estilo_texto(9)))
         notas_direcciones = _notas_direcciones_edificios(edificios_bloques)

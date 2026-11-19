@@ -102,6 +102,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("HistorialPagos", "ImpactoSaldoAnterior", "REAL"),
     ("HistorialPagos", "ImpactoSaldoActual", "REAL"),
     ("ReservaAislada", "ValorHoraAlMomentoDeLaReserva", "REAL"),
+    ("Profesional", "OcultarHoraLiberacionPdf", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

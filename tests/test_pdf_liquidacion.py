@@ -7,9 +7,11 @@ from app.negocio.dias import parsear_periodo, primer_dia_mes, ultimo_dia_mes
 from app.negocio.liquidaciones import calcular_liquidacion, emitir_liquidacion, ids_consolidados
 from app.negocio.pagos import crear_plan_pago_historico
 from app.pdf.liquidacion_pdf import (
+    _bloques_horarios,
     _consultorios_y_horas,
     _items_cuenta,
     _mapa_consultorios,
+    _tabla_bloques_horarios,
     generar_pdf_liquidacion,
     nombre_archivo_liquidacion,
 )
@@ -74,7 +76,7 @@ def test_nombre_archivo_nunca_agrega_sufijo_de_codigo(conn, consultorio):
 def test_items_cuenta_respeta_el_orden_de_dc01(conn, profesional):
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     consultorios = _mapa_consultorios(conn)
-    items = _items_cuenta(liquidacion, consultorios, {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, consultorios, {}, "agosto", "julio")
     conceptos = [c for c, _, _ in items]
     assert conceptos[0].startswith("Importe bruto correspondiente a la reserva regular de agosto")
     assert conceptos[1].startswith("Descuento (")
@@ -88,7 +90,7 @@ def test_items_cuenta_incluye_reversion_justo_despues_del_saldo_anterior(conn, p
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=100)
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     consultorios = _mapa_consultorios(conn)
-    items = _items_cuenta(liquidacion, consultorios, {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, consultorios, {}, "agosto", "julio")
     conceptos = [c for c, _, _ in items]
     idx_saldo = conceptos.index("Saldo pendiente de la liquidación anterior")
     assert conceptos[idx_saldo + 1] == "Reversión del descuento por arrastrar saldos del período anterior"
@@ -99,14 +101,14 @@ def test_items_cuenta_incluye_reversion_justo_despues_del_saldo_anterior(conn, p
 def test_items_cuenta_saldo_anterior_positivo_dice_pendiente(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=500)
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     assert items[3][0] == "Saldo pendiente de la liquidación anterior"
 
 
 def test_items_cuenta_saldo_anterior_negativo_dice_a_favor(conn, profesional):
     obtener_repositorio(conn, "Profesional").actualizar(profesional, SaldoCuentaAnterior=-500)
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     assert items[3][0] == "Saldo a favor de la liquidación anterior"  # #34: sin "del profesional" de más
 
 
@@ -123,7 +125,7 @@ def test_feriado_pendiente_usa_el_mismo_prefijo_que_el_del_mes_en_curso(conn, pr
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     assert len(liquidacion.feriados_pendientes) == 1
 
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     concepto = next(c for c, _, _ in items if "20/7" in c)
     assert concepto.startswith("Descuento por feriado (mes anterior) - ")
     assert "pendiente" not in concepto
@@ -137,7 +139,7 @@ def test_descuento_feriado_agrega_la_descripcion_cargada(conn, profesional):
         Fecha="2026-08-10", Descripcion="Visita Papal", Tipo="Feriado nacional", Activo=1,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     concepto = next(c for c, _, _ in items if "10/8" in c)
     assert concepto == "Descuento por feriado - Lunes 10/8 - Visita Papal"
 
@@ -147,7 +149,7 @@ def test_descuento_feriado_sin_descripcion_no_agrega_guion_de_mas(conn, profesio
         Fecha="2026-08-10", Descripcion=None, Tipo="Feriado nacional", Activo=1,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     concepto = next(c for c, _, _ in items if "10/8" in c)
     assert concepto == "Descuento por feriado - Lunes 10/8"
 
@@ -167,7 +169,7 @@ def test_descuentos_feriados_quedan_ordenados_cronologicamente(conn, profesional
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     assert [f.fecha for f in liquidacion.descuentos_feriados] == ["2026-08-03", "2026-08-17", "2026-08-31"]
 
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     conceptos_feriados = [c for c, _, _ in items if c.startswith("Descuento por feriado - ")]
     assert conceptos_feriados == [
         "Descuento por feriado - Lunes 3/8 - El más viejo",
@@ -187,7 +189,7 @@ def test_descuentos_feriados_y_no_laborables_se_intercalan_por_fecha(conn, profe
     repo.crear(Fecha="2026-08-03", Descripcion="No laborable temprano", Tipo="Día no laborable", Activo=1)
 
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     conceptos = [c for c, _, _ in items if "3/8" in c or "17/8" in c]
     assert conceptos == [
         "Descuento por día no laborable - Lunes 3/8 - No laborable temprano",
@@ -214,7 +216,7 @@ def test_feriados_y_aisladas_se_intercalan_por_fecha_sin_importar_el_tipo(conn, 
     )
 
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     conceptos = [c for c, _, _ in items if "2/8" in c or "17/8" in c or "28/8" in c]
     assert conceptos == [
         "Importe con descuento incluido por feriado del 2/8 de 9 a 11hs consul 1 del 7mo \"L\" - Ramos 1",
@@ -231,7 +233,7 @@ def test_cuota_de_plan_muestra_numero_sobre_el_total(conn, profesional):
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     assert len(liquidacion.cuotas_plan) == 1
 
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     concepto = next(c for c, _, _ in items if c.startswith("Cuota "))
     assert concepto == "Cuota 1/3 del plan de pagos"
 
@@ -253,7 +255,7 @@ def test_items_cuenta_agrupa_deposito_llave_antes_del_item_libre(conn, profesion
         periodo_imputado=PERIODO, id_llave=id_llave,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     conceptos = [c for c, _, _ in items]
     idx_llave = conceptos.index("Depósito llave portón")
     idx_libre = conceptos.index("Bonificación acordada")
@@ -285,7 +287,7 @@ def test_items_cuenta_agrupa_los_cuatro_subtipos_en_orden(conn, profesional):
         periodo_imputado=PERIODO, id_llave=id_llave,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     conceptos = [c for c, _, _ in items]
     orden_esperado = ["Depósito llave portón", "Corrección de carga", "Premio por antigüedad", "Suelto sin subtipo"]
     indices = [conceptos.index(c) for c in orden_esperado]
@@ -302,7 +304,7 @@ def test_items_cuenta_desglosa_bruto_y_descuento_por_tramo_si_cambian_horas(conn
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     assert len(liquidacion.tramos) == 2
 
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     conceptos = [c for c, _, _ in items]
 
     assert conceptos[0].startswith("Importe bruto tramo 1")
@@ -319,7 +321,7 @@ def test_items_cuenta_incluye_linea_redondeo_justo_antes_del_total(conn, profesi
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     liquidacion.ajuste_redondeo = 0.13  # simula el ajuste ya calculado por calcular_liquidacion
 
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
 
     assert items[-2] == ("Redondeo", pytest.approx(0.13), False)
     assert items[-1][0].startswith("Liquidación a abonar")
@@ -329,7 +331,7 @@ def test_items_cuenta_sin_ajuste_de_redondeo_no_agrega_la_linea(conn, profesiona
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
     assert liquidacion.ajuste_redondeo == 0  # DecimalesTotalLiquidacion default (2), feature apagada
 
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
 
     assert all(concepto != "Redondeo" for concepto, _, _ in items)
 
@@ -600,7 +602,7 @@ def test_horas_aisladas_en_plural_cuando_el_bloque_dura_mas_de_una_hora(conn, pr
         HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     concepto = next(c for c, _, _ in items if "5/8" in c)
     assert concepto.startswith("Horas aisladas a trabajar en agosto: ")
 
@@ -611,9 +613,64 @@ def test_horas_aisladas_en_singular_cuando_el_bloque_dura_una_hora(conn, profesi
         HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
     )
     liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
-    items = _items_cuenta(liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
     concepto = next(c for c, _, _ in items if "5/8" in c)
     assert concepto.startswith("Hora aislada a trabajar en agosto: ")
+
+
+def test_aislada_del_mes_actual_en_fecha_de_feriado_aclara_feriado_en_vez_del_mes(conn, profesional, consultorio):
+    """Pedido explícito de la clienta: "cuando se reservan horas
+    aisladas en días feriados... quiero que diga 'Horas aisladas a
+    trabajar en feriado del...'... que agregue lo de feriado al texto
+    preestablecido" — en vez de "en agosto" (el mes), el texto aclara
+    "en feriado del 5/8" cuando la fecha de la aislada cae en un
+    feriado nacional/día no laborable activo (`es_feriado_relevante`,
+    mismo criterio ya usado para reclasificar este mismo caso en el
+    cuadrito de Panel de control)."""
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-08-05", Descripcion="Feriado de prueba", Tipo="Feriado nacional", Activo=1,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    concepto = next(c for c, _, _ in items if "5/8" in c)
+    assert concepto.startswith("Hora aislada a trabajar en feriado del 5/8: ")
+    assert "en agosto" not in concepto
+
+
+def test_aislada_del_mes_anterior_en_fecha_de_feriado_aclara_feriado_en_vez_del_mes(conn, profesional, consultorio):
+    """Mismo criterio que el test anterior, para una aislada PENDIENTE
+    del mes anterior (verbo "trabajada" en vez de "a trabajar")."""
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-07-10", Descripcion="Día no laborable de prueba", Tipo="Día no laborable", Activo=1,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-07-10",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    concepto = next(c for c, _, _ in items if "10/7" in c)
+    assert concepto.startswith("Hora aislada trabajada en feriado del 10/7: ")
+    assert "en julio" not in concepto
+
+
+def test_aislada_fuera_de_un_feriado_sigue_aclarando_el_mes(conn, profesional, consultorio):
+    """La aclaración de feriado es la EXCEPCIÓN — sin ninguna
+    `FechasEspeciales` activa en esa fecha, el texto sigue como
+    siempre, con el nombre del mes."""
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=profesional, IdConsultorio=consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    items = _items_cuenta(conn, liquidacion, _mapa_consultorios(conn), {}, "agosto", "julio")
+    concepto = next(c for c, _, _ in items if "5/8" in c)
+    assert concepto.startswith("Hora aislada a trabajar en agosto: ")
+    assert "feriado" not in concepto
 
 
 def test_hora_aislada_omite_el_edificio_con_un_solo_edificio_en_el_documento(conn, profesional, consultorio, tmp_path):
@@ -673,3 +730,46 @@ def test_reserva_extraordinaria_muestra_su_propio_item_en_vez_de_hora_aislada(co
     texto = _texto_pdf(ruta)
     assert "Uso puntual del consultorio" in texto
     assert "Hora aislada" not in texto
+
+
+def test_tabla_bloques_horarios_muestra_la_hora_real_por_defecto(conn, profesional):
+    bloques = _bloques_horarios(conn, [profesional])
+    tabla = _tabla_bloques_horarios(bloques, 500.0)
+    assert tabla._cellvalues[1][3] == "13hs"
+
+
+def test_tabla_bloques_horarios_muestra_guion_si_se_pide_ocultar(conn, profesional):
+    """Pedido explícito de la clienta: "si pongo el check activo esa
+    diferencia [ocultar la hora real] a aplicar en el PDF" — el guión
+    reemplaza a la hora real SOLO en la columna "Hora liberación", el
+    resto de la fila (Hora inicio, Vigencia, etc.) no cambia."""
+    bloques = _bloques_horarios(conn, [profesional])
+    tabla = _tabla_bloques_horarios(bloques, 500.0, ocultar_hora_liberacion=True)
+    assert tabla._cellvalues[1][3] == "-"
+    assert tabla._cellvalues[1][2] == "10hs"  # Hora inicio sigue mostrando la hora real
+
+
+def _texto_bloques_horarios(texto: str) -> str:
+    """Recorta el fragmento de la tabla de bloques horarios — el resto
+    del documento (ej. la grilla de "Disponibilidad de consultorios")
+    también usa "NNhs" para otras horas, así que buscar en el texto
+    completo daría un falso positivo."""
+    inicio = texto.index("Bloques de horarios regulares reservados")
+    fin = texto.index("Liquidación mensual mes en curso", inicio)
+    return texto[inicio:fin]
+
+
+def test_pdf_liquidacion_oculta_hora_liberacion_si_el_profesional_lo_tiene_tildado(conn, profesional, tmp_path):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, OcultarHoraLiberacionPdf=1)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto_tabla = _texto_bloques_horarios(_texto_pdf(ruta))
+    assert "10hs\n-\n" in texto_tabla
+    assert "13hs" not in texto_tabla
+
+
+def test_pdf_liquidacion_muestra_hora_liberacion_real_por_defecto(conn, profesional, tmp_path):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto_tabla = _texto_bloques_horarios(_texto_pdf(ruta))
+    assert "10hs\n13hs\n" in texto_tabla

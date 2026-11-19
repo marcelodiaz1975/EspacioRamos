@@ -271,6 +271,13 @@ def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
             "Día del mes para plazo extendido automático (1-31, dejar vacío si no aplica)",
             tipo="numero",
         ),
+        # Pedido explícito de la clienta: "por defecto que se vea la
+        # hora real, si pongo el check activo esa diferencia a aplicar
+        # en el PDF" — default sin marcar (hora real visible en "Hora
+        # liberación"), marcado muestra "-" en esa columna del PDF de
+        # liquidación SOLO para este profesional (ver `_tabla_bloques_
+        # horarios`, `app/pdf/liquidacion_pdf.py`).
+        Campo("OcultarHoraLiberacionPdf", "Ocultar hora de liberación en el PDF", tipo="booleano"),
         *campos_libres(conn),
     ]
 

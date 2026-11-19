@@ -166,6 +166,13 @@ CREATE TABLE IF NOT EXISTS Profesional (
     -- Cuando pasan DiasRecordatorioProfesionalXDejoEspacio días desde
     -- esta fecha, vuelve a marrón.
     FechaUltimoRecordatorioDeudaX TEXT,
+    -- Pedido explícito de la clienta: "por defecto que se vea la hora
+    -- real, si pongo el check activo esa diferencia a aplicar en el
+    -- PDF" — default 0 (hora real visible en "Hora liberación" del
+    -- PDF de liquidación), 1 muestra "-" en esa columna SOLO para este
+    -- profesional (ver `_tabla_bloques_horarios`, `app/pdf/
+    -- liquidacion_pdf.py`).
+    OcultarHoraLiberacionPdf INTEGER NOT NULL DEFAULT 0,
     CampoLibre1 TEXT,
     CampoLibre2 TEXT,
     CampoLibre3 TEXT

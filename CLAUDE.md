@@ -1550,3 +1550,78 @@ con_su_color`, `test_botones_de_aisladas_quedan_igual_de_compactos_
 que_los_de_regulares`, ver "Fallos conocidos del sandbox/contenedor"
 más arriba), ajenos a esta ronda. pyflakes limpio en `app/gui/
 pantallas/reservas.py` y `tests/test_gui_reservas.py`.
+
+## PDF de liquidación: dos pedidos puntuales de la clienta (hora de liberación por profesional + aclaración de feriado en aisladas)
+
+Dos consultas de la clienta, planteadas junto con el reporte de
+Reservas regulares de más arriba, ambas resueltas y confirmadas antes
+de tocar código ("Avisame si se puede hacer algo antes de tocar" /
+"Si tenés alguna duda consultame antes").
+
+### "Hora liberación" en "-" para un profesional puntual
+
+> "Consulta, cómo puedo manejar a un profesional que quiero que le
+> aparezca en su PDF una información diferenciada..? Solo a él, no al
+> resto... Necesito que en el cuadro de los bloques reservados en la
+> columna 'Hora liberación' aparezca '-' en lugar de '21hs', solo ese
+> cambio."
+
+Propuesta aceptada: "De acuerdo con el enfoque en el check de
+liberación dentro de la ficha del profesional, por defecto que se vea
+la hora real, si pongo el check activo esa diferencia a aplicar en el
+PDF."
+
+`Profesional` suma la columna `OcultarHoraLiberacionPdf` (booleana,
+default 0 — tanto en `schema.sql` como en `_COLUMNAS_NUEVAS`,
+`app/db/migraciones.py`, mismo mecanismo genérico de `ALTER TABLE ...
+ADD COLUMN` que cualquier columna nueva simple). `_campos_profesional`
+(`app/gui/pantallas/profesionales.py`) suma `Campo("OcultarHoraLiberacionPdf",
+"Ocultar hora de liberación en el PDF", tipo="booleano")` — el
+checkbox sale gratis del motor genérico de `PantallaCRUD`/`Campo`, sin
+tocar `crud_generico.py`.
+
+`_tabla_bloques_horarios` (`app/pdf/liquidacion_pdf.py`) suma el
+parámetro `ocultar_hora_liberacion: bool = False`: el PDF es siempre
+de UN solo profesional (el titular de la liquidación), así que un
+único flag alcanza para toda la tabla — sin él, cada bloque muestra
+"-" en vez de la hora real solo en la columna "Hora liberación" (el
+resto de la fila, Hora inicio incluida, no cambia).
+`generar_pdf_liquidacion` lo pasa desde `profesional["OcultarHoraLiberacionPdf"]`,
+ya resuelto una sola vez al cargar el profesional.
+
+### Aclaración de feriado en el texto de horas aisladas
+
+> "Cuando se reservan horas aisladas en días feriados a profesionales
+> que reservan horarios en esos días quiero que diga 'Horas aisladas a
+> trabajar en feriado del...' o 'Horas aisladas trabajadas en feriado
+> del...'... que agregue lo de feriado al texto preestablecido."
+
+`_texto_aislada` (`app/pdf/liquidacion_pdf.py`) ya tenía la firma
+necesaria para esto desde la ronda A (ver más arriba, "Panel de
+control... bug real — aisladas cargadas en fecha de feriado": la única
+forma que tiene hoy el sistema de registrar un feriado trabajado de
+verdad es cargarlo como una `ReservaAislada` en esa fecha, por falta de
+GUI para `FeriadoTrabajado`). Cuando `item.fecha` cae en un feriado
+relevante (`es_feriado_relevante`, mismo criterio ya usado en esa
+reclasificación de Panel de control), el prefijo del ítem pasa de
+"{concepto} en {mes}: ..." a "{concepto} en feriado del {DD/MM}: ..." —
+la fecha exacta ya aparece más abajo en la misma línea, así que no
+hace falta repetir también el nombre del mes. Sin ningún feriado en esa
+fecha, el texto sigue exactamente igual que antes.
+
+Tests: `tests/test_pdf_liquidacion.py` (+4 para el feriado en aisladas:
+mes actual, mes anterior, caso sin feriado que no cambia, firma de
+`_items_cuenta`/`_texto_aislada` actualizada con `conn` en los ~20
+tests preexistentes que las llamaban; +4 para "Hora liberación":
+`_tabla_bloques_horarios` por defecto/con el flag, integración
+end-to-end vía `generar_pdf_liquidacion` con/sin el profesional
+tildado). `tests/test_profesionales.py` (+3: el checkbox arranca
+destildado en un alta nueva, se guarda tildado, precarga tildado al
+editar un registro que ya lo tenía). Suite conjunta de `test_pdf_
+liquidacion.py`/`test_profesionales.py`/`test_gui_profesionales_
+formulario.py`/`test_migraciones.py`/`test_documentacion_profesional.py`:
+175 passed, 1 failed — el fallo es el ya documentado de calibración de
+fuentes del sandbox en Profesionales (ver "Fallos conocidos del
+sandbox/contenedor" más arriba), ajeno a esta ronda. pyflakes limpio en
+`app/pdf/liquidacion_pdf.py`, `app/db/migraciones.py`, `app/gui/
+pantallas/profesionales.py` y los dos archivos de test tocados.
