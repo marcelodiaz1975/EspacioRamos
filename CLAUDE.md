@@ -833,3 +833,143 @@ py`/`test_gui_imagenes.py` (confirma que el import cruzado de
 negocio/estadisticas.py`, `app/gui/pantallas/estadisticas.py` y los
 dos archivos de test.
 
+## Gastos: bug real de un concepto repetido para distintas unidades + anchos de columna
+
+Tres pedidos puntuales de la clienta sobre "Gastos" (Balance del
+negocio), el más importante un bug real: "tengo dos alquileres, uno
+por la unidad del 9no 'C' y otro por la del 15 'H', solo me muestra y
+computa la del 15 'H'... puede haber un mismo concepto repetido para
+distintas unidades" — y explícito: "si en algún momento te pedí que
+esta solapa reduzca a un item no lo hagas, quiero que detalle todo lo
+que se imputa al período y luego compute todo para la suma" (nunca se
+había pedido eso; se verificó que `_PanelGastos.actualizar()` ya
+listaba todas las filas de `GastoOperativo` sin ningún `GROUP BY` ni
+dedup — la pantalla nunca colapsó nada, así que la causa estaba en
+otro lado).
+
+**Causa real**: `sincronizar_gasto_operativo` (`app/negocio/
+control_pagos.py`, el puente entre "Carga y control" y "Gastos" — ver
+su docstring de módulo) encontraba "el `GastoOperativo` ya
+sincronizado para este concepto" buscando por `Periodo` + `Concepto`
+(el NOMBRE, texto libre) + `Origen='Importado'`. El nombre no es
+único — dos `ConceptoControlPago` distintos pueden compartir nombre
+(ej. "Alquiler" del 9no "C" y del 15 "H") — así que sincronizar el
+segundo encontraba y pisaba la fila del primero en vez de crear una
+propia, y uno de los dos quedaba "perdido" en Balance del negocio. El
+mismo lookup por nombre existía también en `eliminar_instancia_
+duplicada` (deshacer un "Duplicar para período próximo" hecho por
+error) — mismo riesgo de borrar el gasto del concepto equivocado,
+arreglado con el mismo criterio.
+
+**Arreglo**: `GastoOperativo` suma `IdConceptoControlPago` (FK a
+`ConceptoControlPago.IdConcepto`, nullable, solo se usa para
+`Origen='Importado'` — ver el comentario en `schema.sql`, es una
+referencia hacia adelante dentro del mismo script, válida porque
+SQLite solo valida FKs en tiempo de DML, no de DDL). `sincronizar_
+gasto_operativo`/`eliminar_instancia_duplicada` ahora buscan por esa
+identidad estable, nunca por el nombre — dos conceptos con el mismo
+nombre quedan en dos filas de `GastoOperativo` separadas, cada una
+siempre al día con SU propia instancia.
+
+La columna nueva se agrega con dos migraciones en `app/db/
+migraciones.py`, en este orden específico (importa: `GastoOperativo`
+ya pasó por DOS migraciones de "recrear la tabla entera" en rondas
+anteriores — Consultorio y Localidad — para ensanchar el CHECK de
+`Alcance`, y esas dos tienen su propia lista hardcodeada de columnas
+que no sabe nada de columnas agregadas por el camino genérico; agregar
+`IdConceptoControlPago` por ese camino se habría perdido silenciosamente
+cuando esas dos migraciones corrieran después):
+- `_agregar_id_concepto_control_pago_a_gasto`: corre DESPUÉS de las dos
+  migraciones que recrean `GastoOperativo` — para este punto la tabla
+  ya tiene su forma final, un simple `ALTER TABLE ... ADD COLUMN`
+  alcanza (esta columna no tiene ningún CHECK que lo impida).
+- `_corregir_gastos_importados_sin_identidad_de_concepto`: repara el
+  daño que el bug ya hizo en bases existentes — borra los
+  `GastoOperativo` Origen='Importado' que quedaron con
+  `IdConceptoControlPago` NULL (todos los que existían antes del fix,
+  por diseño ambiguos/pisados) y vuelve a sincronizar TODAS las
+  `InstanciaControlPago` con Importe cargado, regenerando una fila
+  correcta y separada por concepto con el monto ACTUAL de cada
+  instancia (no hay forma de recuperar el monto exacto que un gasto ya
+  perdido tenía antes de perderse). Idempotente: si no hay huérfanos no
+  hace nada, segura de correr en cada arranque.
+
+Los otros dos pedidos, de ancho de columna: "Nombre"/"Categoría"/
+"Afectación" ganan un 30% de ancho (`Interactive` en vez de
+`ResizeToContents`, ancho natural × 1.3 calculado después de cargar
+las filas) sacado de "Observación" — sale solo, sin ningún cálculo
+manual, porque es la única columna en `Stretch`.
+
+Tests: `tests/test_control_pagos.py` (+2: dos conceptos con el mismo
+nombre para unidades distintas sincronizan/editan/vacían gastos
+separados sin pisarse, mismo escenario para `eliminar_instancia_
+duplicada`); `tests/test_migraciones.py` (+1: simula el estado ya
+dañado — una fila Importado sin la identidad nueva — y confirma que
+`aplicar_migraciones` la repara, regenerando dos filas correctas,
+idempotente en una segunda corrida); `tests/test_gui_balance.py` (+1:
+las tres columnas miden 1.3× su ancho natural, ±1px). Suite: 25 + 41 +
+37 passed. pyflakes limpio en `app/db/migraciones.py`, `app/negocio/
+control_pagos.py`, `app/gui/pantallas/balance.py` y los tres archivos
+de test.
+
+## Carga y control: ancho de "Importe" para el formato máximo
+
+Mismo pedido ya aplicado en "Registrar pagos" (Monto/Saldo previo/
+Nuevo saldo) e "Historial" de este mismo módulo: "Importe" pasa de un
+% relativo a su ancho natural (que varía según los importes cargados
+en pantalla) a un ancho FIJO calculado con `QFontMetrics` para que
+entre exactamente "$ 0.000.000,00" (`_TEXTO_IMPORTE_MAXIMO`/
+`_PADDING_COLUMNA_IMPORTE`, ya existían, reusados tal cual — antes solo
+los usaba "Historial"). El ancho que esto libera lo sigue absorbiendo
+sola "Nombre"/"Afectación" (`Stretch`, sin cálculo manual). Test
+reescrito: `test_tabla_carga_control_importe_ancho_para_el_formato_
+maximo` (antes comparaba contra natural×1.2×0.8). Suite de `test_gui_
+control_pagos.py`: 50 passed.
+
+## Panel de control: reordenar "Estadísticas principales" + corregir Total liquidado/Saldo pendiente
+
+Dos pedidos sobre el cuadrito "Estadísticas principales mes en curso"
+(`PanelAvanceMes`, `app/gui/pantallas/panel_control.py`):
+
+- Reorden pedido explícitamente: "Gastos operativos"/"Balance de
+  negocio" pasan a estar inmediatamente después de "Total ingresos";
+  "Total liquidado"/"Saldo pendiente de cobro (de lo liquidado)" quedan
+  al final (antes estaban en el medio, antes de Gastos/Balance).
+- Auditoría pedida de "Total liquidado"/"Saldo pendiente": "Total
+  liquidado" (`_total_liquidado_periodo`, `app/negocio/panel_control.
+  py`) YA estaba correcto de una ronda anterior (dedup a la última
+  emisión por profesional vía `MAX(IdLiquidacion) GROUP BY
+  IdProfesional`, sobre `MontoGenerado` — que ya incluye todos los
+  conceptos: especiales, descuentos de feriados/vacaciones/licencias,
+  horas agregadas, aisladas, cuotas de plan — todo lo que la clienta
+  describió), no hizo falta tocarlo.
+
+  **Bug real encontrado y arreglado en "Saldo pendiente de cobro"**
+  (`_saldo_pendiente_periodo`): el ejemplo que dio la clienta — "total
+  liquidado $10.000, un profesional tiene que abonar $500, abona $600 y
+  deja $100 a favor del próximo mes, el saldo pendiente tiene que decir
+  $9500, no $9400" — exponía que el cálculo restaba lo cobrado de TODOS
+  los profesionales de una sola vez contra el total liquidado global
+  (`total_liquidado - SUM(HistorialPagos.Monto)` sin agrupar), sin
+  ningún tope por profesional: el sobrepago de uno terminaba reduciendo
+  el saldo pendiente de los demás en vez de quedar como crédito propio
+  a favor del mes próximo. Se reescribe para calcular profesional por
+  profesional (liquidado de su última emisión del período vs. cobrado
+  imputado a ese mismo período) y sumar los pendientes individuales,
+  cada uno acotado a no bajar de $0 (`max(Liquidado - Pagado, 0)`) — el
+  que pagó de más aporta $0, nunca un valor negativo que termine
+  compensando la deuda de otro.
+
+Tests: `tests/test_panel_control.py` (+1: escenario exacto del ejemplo
+de la clienta, dos profesionales, uno sobrepaga y el otro no paga nada,
+saldo pendiente = $9500 no $9400 — el test preexistente de saldo
+pendiente de un solo profesional sigue pasando tal cual, el cálculo por
+profesional coincide con el global cuando hay uno solo);
+`tests/test_gui_panel_control.py` (+1: orden de las cinco etiquetas en
+el texto de la tarjeta). Suite: 32 + 64 passed, más 281 passed en la
+corrida conjunta con `test_control_pagos.py`/`test_migraciones.py`/
+`test_gui_balance.py`/`test_gui_control_pagos.py`/`test_balance.py`/
+`test_gastos_operativos.py` (confirma que ningún cambio de esta ronda
+pisó a los anteriores). pyflakes limpio en `app/negocio/panel_control.
+py`, `app/gui/pantallas/panel_control.py` y los dos archivos de test.
+
