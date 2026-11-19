@@ -1125,3 +1125,42 @@ quedan entre "Total liquidado" y "Saldo pendiente de cobro"). Suite:
 liquidaciones.py`. pyflakes limpio en `app/negocio/panel_control.py`,
 `app/gui/pantallas/panel_control.py` y los dos archivos de test.
 
+## Reservas aisladas/extraordinarias: cargar una a un profesional A marca su mensaje como enviado en Centro de mensajería
+
+Dos pedidos puntuales de la clienta sobre "Centro de mensajería", a
+partir del flujo de "Reservas aisladas"/"Reservas extraordinarias"
+(`app/gui/pantallas/reservas.py`):
+
+- Cargar (crear/confirmar/cancelar/modificar) una reserva aislada o
+  extraordinaria a un profesional A ya copia el mensaje de detalle al
+  portapapeles (`_copiar_mensaje_detalle`, sin cambios en eso) — ahora
+  ADEMÁS llama a `marcar_mensaje_aislada_generado` (`app.negocio.
+  mensajeria`, ya existía, hasta ahora solo la llamaba el botón
+  "Generar texto" del Centro de mensajería) cuando el profesional es
+  categoría A, así que ese profesional queda celeste->azul en el acto,
+  sin tener que pasar por esa pantalla a mano. Mismo arreglo duplicado
+  en las dos clases que tienen su propio `_copiar_mensaje_detalle`
+  (`_PanelReservasAisladas`/`_PanelReservaExtraordinaria`), mismo
+  criterio de "cada pantalla arma lo suyo" que ya usa el resto del
+  archivo.
+- El período que se marca como generado es `periodo_actual(conn)` (el
+  de HOY, igual que `_copiar_mensaje_detalle` ya usaba para armar el
+  mensaje) — NUNCA el período de la fecha de la reserva que se está
+  cargando. Esto es justamente lo que deja conforme al segundo pedido
+  de la clienta sin tocar nada más: "el celeste... que solo tenga
+  sentido con el avance de mes" — una reserva cargada en noviembre para
+  diciembre (`mensaje_detalle_reserva_aislada` ya arma un solo mensaje
+  con "del mes" + "posteriores") deja azul a NOVIEMBRE nomás; la fila
+  de `EstadoMensajeriaPeriodo` de diciembre para ese profesional nunca
+  se toca, así que al llegar diciembre (avance de mes) sigue celeste —
+  recordatorio de que ese mes puntual todavía no se le mandó nada,
+  aunque la reserva ya estuviera cargada de antes.
+
+Tests nuevos en `tests/test_gui_reservas.py`: `test_crear_reserva_
+aislada_de_profesional_a_marca_mensaje_generado_queda_azul`, `test_
+crear_reserva_aislada_de_profesional_a_para_el_mes_siguiente_no_lo_
+marca_azul_ese_mes` (noviembre queda azul, diciembre sigue celeste —
+`color_profesional` llamado con los dos períodos), `test_crear_reserva_
+extraordinaria_de_profesional_a_marca_mensaje_generado_queda_azul`.
+pyflakes limpio en `app/gui/pantallas/reservas.py`.
+
