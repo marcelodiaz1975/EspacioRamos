@@ -336,6 +336,26 @@ def test_gastos_columna_periodo_al_minimo_y_centrada(qtbot, conn):
     assert panel.tabla.item(0, 0).textAlignment() == Qt.AlignmentFlag.AlignCenter
 
 
+def test_gastos_columnas_nombre_categoria_afectacion_30_por_ciento_mas_anchas(qtbot, conn):
+    """Pedido explícito de la clienta: "Nombre"/"Categoría"/"Afectación"
+    ganan un 30% de ancho, sacado de "Observación" (la única columna en
+    `Stretch`, así que el ancho sale solo sin tocarla a mano)."""
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_gastos
+    obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo=periodo_actual(conn), Concepto="Limpieza de cocheras", Categoria="Mantenimiento",
+        Monto=1000, Alcance="Espacio general", Origen="Manual",
+    )
+    panel.actualizar()
+
+    for columna in (1, 2, 3):
+        ancho_escalado = panel.tabla.columnWidth(columna)
+        panel.tabla.resizeColumnToContents(columna)
+        ancho_esperado = round(panel.tabla.columnWidth(columna) * 1.3)
+        assert abs(ancho_escalado - ancho_esperado) <= 1
+
+
 def test_gastos_se_ordena_por_periodo_afectacion_categoria_y_nombre(qtbot, conn):
     periodo = periodo_actual(conn)
     repo = obtener_repositorio(conn, "GastoOperativo")

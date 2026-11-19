@@ -319,7 +319,12 @@ class _PanelGastos(QWidget):
         self.tabla.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         header = self.tabla.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        for columna in (1, 2, 3, 4, 5):
+        # Nombre/Categoría/Afectación quedan en Interactive (ancho fijo,
+        # +30% calculado en `actualizar()`) en vez de ResizeToContents —
+        # pedido explícito de la clienta.
+        for columna in (1, 2, 3):
+            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Interactive)
+        for columna in (4, 5):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
@@ -486,6 +491,13 @@ class _PanelGastos(QWidget):
         metrica_encabezado = QFontMetrics(self.tabla.horizontalHeader().font())
         ancho_periodo = metrica_encabezado.horizontalAdvance("Período") + _COLCHON_TITULO_COLUMNA
         self.tabla.setColumnWidth(0, ancho_periodo)
+        # Pedido explícito de la clienta: "Nombre"/"Categoría"/"Afectación"
+        # +30% de su ancho natural (post-carga de filas) — el ancho que
+        # esto le saca a "Observación" sale solo, porque es la única
+        # columna en `Stretch` (ver `_armar_ui`).
+        for columna in (1, 2, 3):
+            self.tabla.resizeColumnToContents(columna)
+            self.tabla.setColumnWidth(columna, round(self.tabla.columnWidth(columna) * 1.3))
         self._actualizar_subtotal(periodo, gastos)
         self._actualizar_botones()
 
