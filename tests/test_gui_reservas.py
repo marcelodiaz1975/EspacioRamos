@@ -2096,6 +2096,53 @@ def test_crear_reserva_aislada_de_un_mes_posterior_no_pierde_el_detalle_del_mes_
     assert texto.index("RESERVAS POSTERIORES") > texto.index("SALDO A ABONAR")
 
 
+def test_crear_reserva_aislada_de_profesional_a_marca_mensaje_generado_queda_azul(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: cargar una reserva aislada a un
+    profesional A tiene que dejarlo "ya enviado" (azul) en el Centro de
+    mensajería directamente — copiar el mensaje al portapapeles (que ya
+    hacía antes) ahora también marca el estado, sin esperar a que
+    alguien pase por esa pantalla y toque "Generar texto"."""
+    from app.negocio.mensajeria import color_profesional
+
+    _preparar_categoria_a(conn)
+    _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel._crear()
+
+    profesional = obtener_repositorio(conn, "Profesional").listar()[0]
+    assert color_profesional(conn, profesional, periodo_actual(conn)) == "azul"
+
+
+def test_crear_reserva_aislada_de_profesional_a_para_el_mes_siguiente_no_lo_marca_azul_ese_mes(
+    qtbot, conn, monkeypatch,
+):
+    """Pedido explícito de la clienta: el celeste solo tiene que tener
+    sentido con el avance de mes — una reserva cargada en noviembre para
+    diciembre deja azul a NOVIEMBRE (el mensaje que se copió ahora ya
+    incluye ese aviso, como "RESERVAS POSTERIORES"), pero diciembre
+    tiene que seguir celeste hasta que se le mande el mensaje YA estando
+    en diciembre — no se marca por adelantado."""
+    from app.negocio.dias import sumar_meses
+    from app.negocio.mensajeria import color_profesional
+
+    _preparar_categoria_a(conn)
+    _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_aisladas
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_fecha.setDate(panel.campo_fecha.date().addMonths(1))
+    panel._crear()
+
+    profesional = obtener_repositorio(conn, "Profesional").listar()[0]
+    periodo_siguiente = sumar_meses(periodo_actual(conn), 1)
+    assert color_profesional(conn, profesional, periodo_actual(conn)) == "azul"
+    assert color_profesional(conn, profesional, periodo_siguiente) == "celeste"
+
+
 def test_eliminar_reserva_aislada_copia_mensaje_de_detalle_al_portapapeles(qtbot, conn, monkeypatch):
     _preparar(conn)
     pantalla = PantallaReservas(conn)
@@ -4312,6 +4359,25 @@ def test_crear_reserva_extraordinaria_se_guarda_y_copia_mensaje_al_portapapeles(
     assert len(copiado) == 1
     assert "DETALLE RESERVA" in copiado[0]
     assert "Uso del consultorio para un taller puntual" in copiado[0]
+
+
+def test_crear_reserva_extraordinaria_de_profesional_a_marca_mensaje_generado_queda_azul(qtbot, conn, monkeypatch):
+    """Mismo criterio que "Reservas aisladas": una extraordinaria a un
+    profesional A también deja azul en el Centro de mensajería."""
+    from app.negocio.mensajeria import color_profesional
+
+    _preparar_categoria_a(conn)
+    _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaReservas(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_extraordinaria
+    panel.combo_profesional.setCurrentIndex(1)
+    panel.campo_item.setText("Uso del consultorio para un taller puntual")
+    panel.spin_monto.setValue(12000)
+    panel._crear()
+
+    profesional = obtener_repositorio(conn, "Profesional").listar()[0]
+    assert color_profesional(conn, profesional, periodo_actual(conn)) == "azul"
 
 
 def test_crear_reserva_extraordinaria_muestra_vista_previa_y_cancelar_no_borra_el_formulario(

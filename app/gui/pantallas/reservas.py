@@ -63,6 +63,7 @@ from app.negocio.formato import formatear_moneda
 from app.negocio.lista_espera import GrupoCobertura, marcar_resuelto
 from app.negocio.liquidaciones import calcular_liquidacion, id_profesional_liquidable, regenerar_si_corresponde
 from app.negocio.llaves import llaves_faltantes_para_reserva
+from app.negocio.mensajeria import marcar_mensaje_aislada_generado
 from app.negocio.mensajes import mensaje_detalle_reserva_aislada
 from app.negocio.placas import placa_faltante_para_reserva
 from app.negocio.reservas import (
@@ -3367,6 +3368,13 @@ class _PanelReservasAisladas(QWidget):
         except ValueError:
             return
         QGuiApplication.clipboard().setText(texto)
+        # Pedido explícito de la clienta: copiar el mensaje acá ya
+        # cuenta como "mandado" para el Centro de mensajería — un
+        # profesional A queda celeste->azul en el acto, sin esperar a
+        # que alguien pase por esa pantalla y toque "Generar texto".
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        if profesional is not None and profesional["CategoriaProfesional"] == "A":
+            marcar_mensaje_aislada_generado(self.conn, id_profesional, periodo_actual(self.conn))
 
     def _fila_seleccionada(self) -> sqlite3.Row | None:
         filas = self.tabla.selectionModel().selectedRows()
@@ -3780,6 +3788,11 @@ class _PanelReservaExtraordinaria(QWidget):
         except ValueError:
             return
         QGuiApplication.clipboard().setText(texto)
+        # Mismo criterio que "Reservas aisladas": copiar el mensaje acá
+        # ya cuenta como "mandado" para el Centro de mensajería.
+        profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
+        if profesional is not None and profesional["CategoriaProfesional"] == "A":
+            marcar_mensaje_aislada_generado(self.conn, id_profesional, periodo_actual(self.conn))
 
     def _crear(self) -> None:
         id_profesional = self.combo_profesional.currentData()
