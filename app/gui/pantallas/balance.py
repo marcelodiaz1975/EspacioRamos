@@ -58,6 +58,7 @@ from app.gui.pantallas.pagos import _SpinMonto
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_centrado
+from app.gui.widgets.orden_tabla import OrdenTabla
 from app.gui.widgets.resumen_saldo import item_monto
 from app.gui.widgets.selector_periodo import SelectorPeriodo
 from app.negocio.balance import resultado_periodo, total_ingresos_periodo
@@ -328,6 +329,12 @@ class _PanelGastos(QWidget):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
         self.tabla.itemSelectionChanged.connect(self._actualizar_botones)
+        # Tabla ordenable por click en el encabezado — pedido explícito
+        # de la clienta, mismo mecanismo que "Carga y control"/
+        # "Historial"/"Registrar pagos" (`OrdenTabla`, ver `app/gui/
+        # widgets/orden_tabla.py`). El orden por click es un criterio
+        # transitorio: F5 lo vuelve al orden por defecto (`reiniciar`).
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
 
         panel_izquierda = QWidget()
         panel_izquierda.setFixedWidth(_ANCHO_PANEL_FILTROS)
@@ -473,6 +480,8 @@ class _PanelGastos(QWidget):
         # Pedido explícito de la clienta: se ordena por período primero,
         # luego por afectación, luego por categoría, luego por nombre.
         filas.sort(key=lambda f: (f[0]["Periodo"], f[1], f[0]["Categoria"] or "", f[0]["Concepto"] or ""))
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden_columna(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [f[0] for f in filas]
 
         self.tabla.setRowCount(len(filas))
@@ -492,14 +501,35 @@ class _PanelGastos(QWidget):
         ancho_periodo = metrica_encabezado.horizontalAdvance("Período") + _COLCHON_TITULO_COLUMNA
         self.tabla.setColumnWidth(0, ancho_periodo)
         # Pedido explícito de la clienta: "Nombre"/"Categoría"/"Afectación"
-        # +30% de su ancho natural (post-carga de filas) — el ancho que
-        # esto le saca a "Observación" sale solo, porque es la única
-        # columna en `Stretch` (ver `_armar_ui`).
+        # +30% de su ancho natural (post-carga de filas); ronda
+        # siguiente: +25% más sobre ese ancho ya ampliado (total
+        # natural×1.3×1.25, mismo criterio en cascada que "Cuenta/Id"/
+        # "Importe" de "Carga y control", CLAUDE.md). El ancho que esto
+        # le saca a "Observación" sale solo, porque es la única columna
+        # en `Stretch` (ver `_armar_ui`).
         for columna in (1, 2, 3):
             self.tabla.resizeColumnToContents(columna)
-            self.tabla.setColumnWidth(columna, round(self.tabla.columnWidth(columna) * 1.3))
+            ancho_mas_30 = round(self.tabla.columnWidth(columna) * 1.3)
+            self.tabla.setColumnWidth(columna, round(ancho_mas_30 * 1.25))
         self._actualizar_subtotal(periodo, gastos)
         self._actualizar_botones()
+
+    @staticmethod
+    def _clave_orden_columna(columna: int):
+        """Clave de orden para un click de encabezado — mismo criterio
+        que `control_pagos._PanelCargaControl._clave_orden_columna`: un
+        dict de lambdas, una por columna, sobre la misma tupla
+        (gasto, afectación) que ya arma `actualizar`."""
+        claves = {
+            0: lambda f: f[0]["Periodo"],
+            1: lambda f: f[0]["Concepto"] or "",
+            2: lambda f: f[0]["Categoria"] or "",
+            3: lambda f: f[1],
+            4: lambda f: f[0]["Monto"] or 0,
+            5: lambda f: f[0]["Origen"] or "",
+            6: lambda f: f[0]["Observacion"] or "",
+        }
+        return claves[columna]
 
     def _actualizar_subtotal(self, periodo: str, gastos: list) -> None:
         """El subtotal es siempre el total REAL del período elegido —
@@ -584,10 +614,11 @@ class _PanelGastos(QWidget):
 
     def reiniciar(self) -> None:
         """F5: vuelve todo a su estado inicial (período actual, filtros,
-        selección) — mismo criterio que el resto del sistema (CLAUDE.md,
-        "F5... reinicia desde cero, distinto de showEvent")."""
+        orden, selección) — mismo criterio que el resto del sistema
+        (CLAUDE.md, "F5... reinicia desde cero, distinto de showEvent")."""
         self.campo_periodo.set_periodo(periodo_actual(self.conn))
         self.tabla.clearSelection()
+        self._orden.reiniciar()
         self._reiniciar_filtros()
         self.campo_periodo.setFocus()
 

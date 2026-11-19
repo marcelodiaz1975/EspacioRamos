@@ -336,10 +336,12 @@ def test_gastos_columna_periodo_al_minimo_y_centrada(qtbot, conn):
     assert panel.tabla.item(0, 0).textAlignment() == Qt.AlignmentFlag.AlignCenter
 
 
-def test_gastos_columnas_nombre_categoria_afectacion_30_por_ciento_mas_anchas(qtbot, conn):
+def test_gastos_columnas_nombre_categoria_afectacion_30_por_ciento_y_25_por_ciento_mas_anchas(qtbot, conn):
     """Pedido explícito de la clienta: "Nombre"/"Categoría"/"Afectación"
-    ganan un 30% de ancho, sacado de "Observación" (la única columna en
-    `Stretch`, así que el ancho sale solo sin tocarla a mano)."""
+    ganan un 30% de ancho (ronda anterior), y otro 25% más sobre eso
+    (ronda siguiente, cascada: natural×1.3×1.25) — sacado de
+    "Observación" (la única columna en `Stretch`, así que el ancho sale
+    solo sin tocarla a mano)."""
     pantalla = PantallaBalanceDelNegocio(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_gastos
@@ -352,7 +354,7 @@ def test_gastos_columnas_nombre_categoria_afectacion_30_por_ciento_mas_anchas(qt
     for columna in (1, 2, 3):
         ancho_escalado = panel.tabla.columnWidth(columna)
         panel.tabla.resizeColumnToContents(columna)
-        ancho_esperado = round(panel.tabla.columnWidth(columna) * 1.3)
+        ancho_esperado = round(round(panel.tabla.columnWidth(columna) * 1.3) * 1.25)
         assert abs(ancho_escalado - ancho_esperado) <= 1
 
 
@@ -564,6 +566,52 @@ def test_gastos_f5_reinicia_periodo_filtros_y_seleccion(qtbot, conn):
 
     assert panel.campo_periodo.periodo() == periodo_actual(conn)
     assert not panel.tabla.selectionModel().selectedRows()
+
+
+def test_gastos_tabla_ordenable_por_click_en_encabezado(qtbot, conn):
+    """Pedido explícito de la clienta: tabla ordenable por click en el
+    encabezado, mismo mecanismo (`OrdenTabla`) que "Carga y control"/
+    "Historial"/"Registrar pagos"."""
+    periodo = periodo_actual(conn)
+    repo = obtener_repositorio(conn, "GastoOperativo")
+    repo.crear(Periodo=periodo, Concepto="Zeta", Monto=1, Alcance="Espacio general", Origen="Manual")
+    repo.crear(Periodo=periodo, Concepto="Alfa", Monto=1, Alcance="Espacio general", Origen="Manual")
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_gastos
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(1)  # Nombre, ascendente
+
+    assert panel.tabla.item(0, 1).text() == "Alfa"
+    assert panel.tabla.item(1, 1).text() == "Zeta"
+
+    panel.tabla.horizontalHeader().sectionClicked.emit(1)  # mismo click, invierte
+
+    assert panel.tabla.item(0, 1).text() == "Zeta"
+    assert panel.tabla.item(1, 1).text() == "Alfa"
+
+
+def test_gastos_f5_tambien_reinicia_el_orden(qtbot, conn):
+    periodo = periodo_actual(conn)
+    repo = obtener_repositorio(conn, "GastoOperativo")
+    repo.crear(Periodo=periodo, Concepto="Zeta", Monto=1, Alcance="Espacio general", Origen="Manual")
+    repo.crear(Periodo=periodo, Concepto="Alfa", Monto=1, Alcance="Espacio general", Origen="Manual")
+    pantalla = PantallaBalanceDelNegocio(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_gastos
+    # Orden por defecto (Período/Afectación/Categoría/Nombre) ya deja
+    # "Alfa" antes que "Zeta" — dos clicks en "Nombre" invierte a
+    # descendente, distinto del default, para poder distinguir que F5
+    # lo vuelve a dejar como estaba.
+    panel.tabla.horizontalHeader().sectionClicked.emit(1)
+    panel.tabla.horizontalHeader().sectionClicked.emit(1)
+    assert panel.tabla.item(0, 1).text() == "Zeta"
+
+    panel.reiniciar()
+
+    assert panel._orden.columna is None
+    assert panel.tabla.item(0, 1).text() == "Alfa"
+    assert panel.tabla.item(1, 1).text() == "Zeta"
 
 
 def test_dialogo_gasto_categoria_ofrece_las_de_control_de_pagos(qtbot, conn):
