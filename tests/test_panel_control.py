@@ -252,6 +252,74 @@ def test_estadisticas_principales_total_liquidado_no_duplica_reemisiones(conn):
     assert principales.total_liquidado == pytest.approx(170000.0)  # última de prof1 (120000) + prof2 (50000)
 
 
+def test_desglose_liquidaciones_feriados_vacaciones_aisladas_y_cuotas(conn):
+    """Pedido explícito de la clienta: después de preguntar por qué
+    "Monto por reservas regulares" + "Monto por reservas aisladas" no
+    coincide con "Total liquidado", se agregan estas cuatro líneas de
+    desglose (caso real de su propia base: el principal era el
+    descuento por feriados). Escenario con los cuatro conceptos a la
+    vez, montos verificados contra las mismas fórmulas de `app.negocio.
+    liquidaciones.calcular_liquidacion`."""
+    from app.negocio.liquidaciones import emitir_liquidacion
+    from app.negocio.pagos import crear_plan_pago_historico
+    from app.negocio.valores import obtener_porcentaje_descuento
+    from app.negocio.vacaciones import crear_vacacion
+
+    _fijar_fecha(conn, "2026-08-15")
+    periodo = "2026-08"
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000, ValorHoraAisladaActual=500,
+    )
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01",
+    )
+    # 17-08-2026 es lunes — feriado nacional ese día.
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-08-17", Descripcion="Feriado de prueba", Tipo="Feriado nacional",
+    )
+    crear_vacacion(conn, id_profesional=id_prof, fecha_desde="2026-08-03", fecha_hasta="2026-08-09")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    crear_plan_pago_historico(
+        conn, id_profesional=id_prof, monto_refinanciado=300, cantidad_cuotas=3, mes_ano_inicio=periodo,
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo, fecha_emision="2026-08-20")
+
+    desglose = calcular_estadisticas_principales(conn).desglose_liquidaciones
+
+    descuento_pct = obtener_porcentaje_descuento(conn, 2)
+    monto_feriado_esperado = 2 * 1000 * (1 - descuento_pct / 100)
+    assert desglose.descuento_feriados == pytest.approx(-monto_feriado_esperado)
+    assert desglose.descuento_vacaciones_licencias < 0
+    assert desglose.aisladas_en_liquidaciones == pytest.approx(2 * 500)
+    assert desglose.cuotas_planes_pago == pytest.approx(100)
+
+
+def test_desglose_liquidaciones_ignora_profesionales_sin_liquidacion_mensual_propia(conn):
+    """Categoría E (se consolida en la liquidación de su R) y categoría B
+    (nunca se liquida) no tienen una liquidación propia — `calcular_
+    liquidacion` las rechaza con `ValueError`. Una fila de
+    `LiquidacionEmitida` con MontoGenerado=0 para una de ellas (como
+    deja el sistema real, ver CLAUDE.md "Panel de control: segundo bug
+    real...") no puede romper el desglose."""
+    _fijar_fecha(conn, "2026-08-15")
+    id_prof_e = _profesional(conn, CategoriaProfesional="E")
+    obtener_repositorio(conn, "LiquidacionEmitida").crear(IdProfesional=id_prof_e, Periodo="2026-08", MontoGenerado=0)
+
+    desglose = calcular_estadisticas_principales(conn).desglose_liquidaciones
+
+    assert desglose.descuento_feriados == 0.0
+    assert desglose.descuento_vacaciones_licencias == 0.0
+    assert desglose.aisladas_en_liquidaciones == 0.0
+    assert desglose.cuotas_planes_pago == 0.0
+
+
 def test_estadisticas_principales_saldo_pendiente_no_resta_el_sobrepago_de_un_profesional(conn):
     """Bug real encontrado y arreglado (pedido explícito de la clienta,
     ejemplo dado): total liquidado $10.000 — un profesional debía $500

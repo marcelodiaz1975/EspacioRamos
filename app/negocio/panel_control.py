@@ -30,6 +30,7 @@ from app.negocio.estadisticas import (
     monto_neto_aislada_periodo,
     monto_neto_regular_periodo,
 )
+from app.negocio.liquidaciones import calcular_liquidacion
 from app.pdf.estilos import clave_orden_unidad
 from app.repositorio.registro import obtener_repositorio
 
@@ -287,6 +288,68 @@ def calcular_estadisticas_ocupacion_por_unidad(conn: sqlite3.Connection) -> list
 
 
 @dataclass
+class DesgloseLiquidaciones:
+    """Por qué "Total liquidado" no coincide con "Monto por reservas
+    regulares" + "Monto por reservas aisladas" — ver `_desglose_
+    liquidaciones_periodo`. `descuento_feriados`/`descuento_vacaciones_
+    licencias` ya vienen en NEGATIVO (restan); `aisladas_en_
+    liquidaciones`/`cuotas_planes_pago` en positivo (suman)."""
+    descuento_feriados: float
+    descuento_vacaciones_licencias: float
+    aisladas_en_liquidaciones: float
+    cuotas_planes_pago: float
+
+
+def _desglose_liquidaciones_periodo(conn: sqlite3.Connection, periodo: str) -> DesgloseLiquidaciones:
+    """Desglosa, para cada profesional con una liquidación emitida este
+    período (última emisión, mismo criterio que `_total_liquidado_
+    periodo`), los conceptos que hacen que "Total liquidado" no
+    coincida con "Monto por reservas regulares" + "Monto por reservas
+    aisladas" (pedido explícito de la clienta, después de preguntar por
+    qué difieren) — el caso real de la clienta con su propia base de
+    datos mostró que el principal era el descuento por feriados no
+    trabajados.
+
+    Recalcula la liquidación de cada profesional con `calcular_
+    liquidacion` (AHORA, con los datos y valores vigentes), mismo
+    criterio "en vivo" que ya usan `monto_neto_regular_periodo`/
+    `monto_neto_aislada_periodo` en este mismo cuadrito — puede no
+    coincidir centavo a centavo con el `MontoGenerado` ya FROZEN en
+    `LiquidacionEmitida` si algo cambió después de emitida (mismo caso
+    ya documentado para feriados/aisladas), pero sirve para explicar de
+    un vistazo de dónde sale la diferencia, no para una reconciliación
+    exacta. Categoría E (se consolida en la liquidación de su R) y
+    categoría B (nunca se liquida) no tienen una liquidación propia
+    — `calcular_liquidacion` las rechaza con `ValueError`, se ignoran
+    acá (su aporte ya está contado en la liquidación del R que las
+    consolida)."""
+    ids = [
+        f["IdProfesional"] for f in conn.execute(
+            "SELECT IdProfesional FROM LiquidacionEmitida WHERE Periodo = ? GROUP BY IdProfesional", (periodo,),
+        ).fetchall()
+    ]
+    descuento_feriados = 0.0
+    descuento_vacaciones_licencias = 0.0
+    aisladas_en_liquidaciones = 0.0
+    cuotas_planes_pago = 0.0
+    for id_profesional in ids:
+        try:
+            liq = calcular_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
+        except ValueError:
+            continue
+        descuento_feriados -= (
+            liq.total_descuento_feriados + liq.total_descuento_no_laborables + liq.total_feriados_pendientes
+        )
+        descuento_vacaciones_licencias -= liq.total_descuento_vacaciones + liq.total_descuento_licencias
+        aisladas_en_liquidaciones += liq.total_aisladas_mes_anterior + liq.total_aisladas_mes_en_curso
+        cuotas_planes_pago += liq.total_cuotas_plan
+    return DesgloseLiquidaciones(
+        descuento_feriados=descuento_feriados, descuento_vacaciones_licencias=descuento_vacaciones_licencias,
+        aisladas_en_liquidaciones=aisladas_en_liquidaciones, cuotas_planes_pago=cuotas_planes_pago,
+    )
+
+
+@dataclass
 class EstadisticasPrincipales:
     monto_regulares: float
     monto_aisladas: float
@@ -295,6 +358,7 @@ class EstadisticasPrincipales:
     saldo_pendiente: float
     gastos_operativos: float
     balance_negocio: float
+    desglose_liquidaciones: DesgloseLiquidaciones
 
 
 def calcular_estadisticas_principales(conn: sqlite3.Connection) -> EstadisticasPrincipales:
@@ -313,6 +377,7 @@ def calcular_estadisticas_principales(conn: sqlite3.Connection) -> EstadisticasP
         saldo_pendiente=_saldo_pendiente_periodo(conn, periodo),
         gastos_operativos=gastos,
         balance_negocio=balance,
+        desglose_liquidaciones=_desglose_liquidaciones_periodo(conn, periodo),
     )
 
 

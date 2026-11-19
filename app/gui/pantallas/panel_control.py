@@ -691,6 +691,7 @@ class _PanelAvancePeriodo(QWidget):
         )
 
         principales = calcular_estadisticas_principales(self.conn)
+        desglose = principales.desglose_liquidaciones
         self.etiqueta_estadisticas_principales.setText(
             f"Monto por reservas regulares: {formatear_moneda(principales.monto_regulares)}\n"
             f"Monto por reservas aisladas: {formatear_moneda(principales.monto_aisladas)}\n"
@@ -698,6 +699,10 @@ class _PanelAvancePeriodo(QWidget):
             f"Gastos operativos: {formatear_moneda(principales.gastos_operativos)}\n"
             f"Balance de negocio: {formatear_moneda(principales.balance_negocio)}\n"
             f"Total liquidado: {formatear_moneda(principales.total_liquidado)}\n"
+            f"  Descuento por feriados: {formatear_moneda(desglose.descuento_feriados)}\n"
+            f"  Descuento por vacaciones y licencias: {formatear_moneda(desglose.descuento_vacaciones_licencias)}\n"
+            f"  Reservas aisladas en liquidaciones: {formatear_moneda(desglose.aisladas_en_liquidaciones)}\n"
+            f"  Cuotas de planes de pago en liquidaciones: {formatear_moneda(desglose.cuotas_planes_pago)}\n"
             f"Saldo pendiente de cobro (de lo liquidado): {formatear_moneda(principales.saldo_pendiente)}"
         )
 

@@ -552,6 +552,23 @@ def test_tarjeta_estadisticas_principales_muestra_los_siete_conceptos(qtbot, con
         assert etiqueta in texto
 
 
+def test_tarjeta_estadisticas_principales_desglose_entre_liquidado_y_pendiente(qtbot, conn):
+    """Pedido explícito de la clienta: las cuatro líneas de desglose
+    (feriados/vacaciones/aisladas/cuotas) quedan entre "Total liquidado"
+    y "Saldo pendiente de cobro", para explicar de un vistazo por qué
+    difieren los dos totales de arriba."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.panel_avance.etiqueta_estadisticas_principales.text()
+    orden_esperado = [
+        "Total liquidado:", "Descuento por feriados:", "Descuento por vacaciones y licencias:",
+        "Reservas aisladas en liquidaciones:", "Cuotas de planes de pago en liquidaciones:",
+        "Saldo pendiente de cobro (de lo liquidado):",
+    ]
+    posiciones = [texto.index(etiqueta) for etiqueta in orden_esperado]
+    assert posiciones == sorted(posiciones)
+
+
 def test_tarjeta_estadisticas_principales_reordena_gastos_y_balance_antes_de_liquidado(qtbot, conn):
     """Pedido explícito de la clienta: "Gastos operativos"/"Balance de
     negocio" pasan a estar inmediatamente después de "Total ingresos";
