@@ -571,20 +571,36 @@ def test_tarjeta_estadisticas_principales_muestra_las_lineas_de_las_tres_seccion
         assert etiqueta in texto
 
 
-def test_tarjeta_estadisticas_principales_tres_subtitulos_en_itálica_y_en_orden(qtbot, conn):
-    """Pedido explícito de la clienta: tres subtítulos en itálica
-    ("Liquidaciones mes en curso" / "Resultado del negocio" / "Monto a
-    cobrar en el mes en curso"), en ese orden."""
+def test_tarjeta_estadisticas_principales_tres_subtitulos_en_itálica_subrayados_y_en_orden(qtbot, conn):
+    """Pedido explícito de la clienta: tres subtítulos en itálica Y
+    SUBRAYADOS ("Liquidaciones mes en curso" / "Resultado del negocio" /
+    "Monto a cobrar en el mes en curso"), en ese orden — a diferencia de
+    los totales de cada sección, que son itálica SIN subrayar (ver
+    `test_tarjeta_estadisticas_principales_los_tres_totales_van_en_
+    italica_sin_subrayar`)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     tarjeta = _tarjeta_de(pantalla.panel_avance.etiqueta_total_liquidado)
     subtitulos = [
         e for e in tarjeta.findChildren(QLabel)
-        if e.styleSheet() == "font-style: italic;"
+        if e.styleSheet() == "font-style: italic; text-decoration: underline;"
     ]
     assert [e.text() for e in subtitulos] == [
         "Liquidaciones mes en curso", "Resultado del negocio", "Monto a cobrar en el mes en curso",
     ]
+
+
+def test_tarjeta_estadisticas_principales_linea_en_blanco_antes_del_primer_subtitulo(qtbot, conn):
+    """Pedido explícito de la clienta: una línea de espacio en blanco
+    antes de "Liquidaciones mes en curso" (el primer subtítulo) —
+    mismo `addSpacing(12)` ya usado entre las otras dos secciones."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_avance
+    contenido = panel.etiqueta_total_liquidado.parentWidget()
+    layout = contenido.layout()
+    primer_item_con_widget = next(i for i in range(layout.count()) if layout.itemAt(i).widget() is not None)
+    assert primer_item_con_widget > 0  # hay al menos un ítem de espaciado antes
 
 
 def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, conn):
@@ -607,14 +623,18 @@ def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, con
     assert posiciones == sorted(posiciones)
 
 
-def test_tarjeta_estadisticas_principales_los_tres_totales_van_en_negrita(qtbot, conn):
+def test_tarjeta_estadisticas_principales_los_tres_totales_van_en_italica_sin_subrayar(qtbot, conn):
+    """Pedido explícito de la clienta (corrección de la ronda anterior,
+    donde quedaban en negrita): los tres totales pasan a itálica SIN
+    subrayar, sin negrita — el subrayado queda reservado a los
+    subtítulos de cada sección."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_avance
     for etiqueta in (
         panel.etiqueta_total_liquidado, panel.etiqueta_balance_negocio, panel.etiqueta_monto_restante_a_cobrar,
     ):
-        assert "font-weight: bold;" in etiqueta.styleSheet()
+        assert etiqueta.styleSheet() == "font-style: italic;"
 
 
 def test_tarjeta_profesionales_muestra_los_cuatro_conceptos_nuevos(qtbot, conn):

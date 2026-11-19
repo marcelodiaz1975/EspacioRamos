@@ -353,6 +353,52 @@ def test_desglose_liquidaciones_feriados_vacaciones_aisladas_y_cuotas(conn):
     assert desglose.cuotas_planes_pago == pytest.approx(100)
 
 
+def test_desglose_liquidaciones_aislada_cargada_en_fecha_de_feriado_cuenta_como_feriado_trabajado(conn):
+    """Caso real de la clienta: una profesional avisó que iba a trabajar
+    un feriado descontado, pero como no hay ninguna pantalla para cargar
+    un `FeriadoTrabajado` de verdad, se terminó cargando como una
+    `ReservaAislada` en la fecha del feriado — en el PDF queda como
+    "hora aislada". Pedido explícito: para la sumatoria de ESTE cuadrito
+    (no se tocó el PDF ni la liquidación real), una aislada cuya fecha
+    cae en un feriado nacional/día no laborable activo cuenta como
+    "Feriados trabajados", no como "Reservas aisladas"."""
+    from app.negocio.liquidaciones import emitir_liquidacion
+
+    _fijar_fecha(conn, "2026-08-15")
+    periodo = "2026-08"
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000, ValorHoraAisladaActual=500,
+    )
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01",
+    )
+    # 17-08-2026 es lunes — feriado nacional ese día.
+    obtener_repositorio(conn, "FechasEspeciales").crear(
+        Fecha="2026-08-17", Descripcion="Feriado de prueba", Tipo="Feriado nacional",
+    )
+    # Aislada cargada justo EN el feriado (lo que realmente pasó): cuenta
+    # como feriado trabajado, no como aislada común.
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-17",
+        HoraInicio=9, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    # Otra aislada en una fecha SIN feriado: sigue siendo aislada común.
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-05",
+        HoraInicio=9, HoraFin=10, Estado="Confirmada", AplicaRecargo=0,
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo, fecha_emision="2026-08-20")
+
+    desglose = calcular_estadisticas_principales(conn).desglose_liquidaciones
+
+    assert desglose.feriados_trabajados == pytest.approx(2 * 500)  # la aislada del 17-08
+    assert desglose.aisladas_en_liquidaciones == pytest.approx(1 * 500)  # la aislada del 05-08
+
+
 def test_desglose_liquidaciones_ignora_profesionales_sin_liquidacion_mensual_propia(conn):
     """Categoría E (se consolida en la liquidación de su R) y categoría B
     (nunca se liquida) no tienen una liquidación propia — `calcular_

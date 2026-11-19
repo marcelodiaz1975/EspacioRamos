@@ -25,6 +25,7 @@ from app.negocio.dias import (
     ultimo_dia_mes,
 )
 from app.negocio.estadisticas import _horas_regulares_semanales_en_fecha, calcular_ocupacion
+from app.negocio.feriados import es_feriado_relevante
 from app.negocio.liquidaciones import calcular_liquidacion
 from app.pdf.estilos import clave_orden_unidad
 from app.repositorio.registro import obtener_repositorio
@@ -267,7 +268,21 @@ def _desglose_liquidaciones_periodo(conn: sqlite3.Connection, periodo: str) -> D
     sin línea propia en el cuadrito (pedido explícito de la clienta):
     reversión del descuento por saldo atrasado, feriados pendientes de
     un mes anterior agregados tarde, horas regulares agregadas a mitad
-    de mes, ajuste por saldo atrasado, ajuste de redondeo."""
+    de mes, ajuste por saldo atrasado, ajuste de redondeo.
+
+    Caso real de la clienta: no hay ninguna pantalla para cargar un
+    `FeriadoTrabajado` "de verdad" (confirmado por grep — la tabla y el
+    cálculo existen en `calcular_liquidacion`, pero ningún formulario la
+    usa), así que cuando un profesional R trabaja un feriado se termina
+    cargando como una `ReservaAislada` en esa fecha — en el PDF queda
+    como "hora aislada", no como "feriado trabajado". Para que la
+    sumatoria de ESTE cuadrito (pedido explícito, acotado a este cuadro,
+    no a la liquidación real ni al PDF) refleje el concepto real y no
+    el mecanismo con el que se cargó, cada ítem de `aisladas_mes_
+    anterior`/`aisladas_mes_en_curso` cuya fecha caiga en un feriado
+    nacional/día no laborable activo (`es_feriado_relevante`, mismo
+    criterio que ya usa el descuento de feriados) suma a `feriados_
+    trabajados` en vez de a `aisladas_en_liquidaciones`."""
     ids = [
         f["IdProfesional"] for f in conn.execute(
             "SELECT IdProfesional FROM LiquidacionEmitida WHERE Periodo = ? GROUP BY IdProfesional", (periodo,),
@@ -292,7 +307,11 @@ def _desglose_liquidaciones_periodo(conn: sqlite3.Connection, periodo: str) -> D
         descuento_feriados -= (liq.total_descuento_feriados + liq.total_descuento_no_laborables)
         descuento_vacaciones -= liq.total_descuento_vacaciones
         descuento_licencias -= liq.total_descuento_licencias
-        aisladas_en_liquidaciones += liq.total_aisladas_mes_anterior + liq.total_aisladas_mes_en_curso
+        for item in liq.aisladas_mes_anterior + liq.aisladas_mes_en_curso:
+            if es_feriado_relevante(conn, item.fecha):
+                feriados_trabajados += item.monto
+            else:
+                aisladas_en_liquidaciones += item.monto
         feriados_trabajados += (
             liq.total_feriados_trabajados_mes_anterior + liq.total_feriados_trabajados_mes_en_curso
         )

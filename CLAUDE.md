@@ -1361,3 +1361,69 @@ negocio/GUI tocados: sin regresiones nuevas (ver CLAUDE.md, "Fallos
 conocidos del sandbox/contenedor" para los ~10 fallos preexistentes
 ajenos a esta ronda). pyflakes limpio en los ocho archivos tocados.
 
+## Panel de control ("Estadísticas principales mes en curso"): subtítulos subrayados, totales en itálica, línea en blanco; bug real — aisladas cargadas en fecha de feriado
+
+Cuatro pedidos puntuales de la clienta sobre el cuadro largo recién
+armado en la ronda anterior:
+
+- Los tres subtítulos de sección (`_subtitulo_italica`) suman
+  subrayado además de la itálica que ya tenían
+  (`"font-style: italic; text-decoration: underline;"`).
+- Los tres totales ("Total liquidado mes en curso"/"Balance del
+  negocio"/"Monto restante del mes a cobrar") pasan de negrita a
+  itálica SIN subrayar (`"font-style: italic;"`) — corrección explícita
+  de la ronda anterior, donde habían quedado en negrita.
+- Una línea en blanco (`addSpacing(12)`, mismo valor ya usado entre
+  las otras dos secciones) antes del primer subtítulo ("Liquidaciones
+  mes en curso").
+
+**Bug real encontrado, investigado antes de tocar nada**: la clienta
+reportó que "Feriados trabajados" le daba 0 aunque una profesional (R60
+Julieta Battaglia) le avisó que iba a trabajar un feriado descontado —
+"en el PDF se incluyó como horas aisladas". Investigado con grep antes
+de asumir nada: existe una tabla `FeriadoTrabajado` y todo el cálculo
+en `calcular_liquidacion` para ese concepto (`_calcular_feriados_
+trabajados`), pero NINGÚN formulario del sistema la usa — no hay
+ninguna pantalla para cargar un "feriado trabajado" de verdad. Por eso
+la clienta, sin otra alternativa, cargó esas horas como una
+`ReservaAislada` en la fecha del feriado — correcta para que se le
+pague, pero mal clasificada: el PDF la muestra como "hora aislada" y
+este cuadrito la contaba en "Reservas aisladas" en vez de "Feriados
+trabajados".
+
+Pedido explícito de la clienta, acotado por ella misma a la sumatoria
+de este cuadrito ("ese concepto es el que se tendría que tomar en
+cuenta a la hora de la sumatoria en el cuadro este que te estoy
+diciendo"): NO se tocó `calcular_liquidacion` ni el PDF ni los mensajes
+(sigue viéndose "hora aislada" ahí, sin cambios) — se acotó la
+reclasificación a `_desglose_liquidaciones_periodo` (`app/negocio/
+panel_control.py`). Cada ítem de `aisladas_mes_anterior`/`aisladas_
+mes_en_curso` cuya `fecha` cae en un feriado nacional/día no laborable
+activo (`es_feriado_relevante`, `app.negocio.feriados` — mismo criterio
+que ya usa el descuento de feriados en la liquidación real) suma a
+`feriados_trabajados` en vez de a `aisladas_en_liquidaciones`; el total
+del cuadrito (`DesgloseLiquidaciones.total`) no cambia, solo a qué
+línea va cada monto, así que sigue cerrando exacto contra `Liquidacion.
+monto_generado`.
+
+Pendiente de definición explícita de la clienta (no se tocó en esta
+ronda, ver tarea abierta): si además quiere una pantalla para cargar
+un "Feriado trabajado" de verdad (la tabla y el cálculo ya existen, les
+falta GUI) y/o que el PDF/mensaje de esa aislada diga "Horas trabajadas
+en feriado del DD/MM" en vez de "hora aislada" — eso es un cambio más
+grande, a la liquidación real y a lo que ve el profesional, no solo al
+cuadrito de Panel de control.
+
+Tests: `tests/test_gui_panel_control.py` — reescritos `test_tarjeta_
+estadisticas_principales_tres_subtitulos_en_itálica_subrayados_y_en_
+orden` (antes sin el subrayado) y `test_tarjeta_estadisticas_
+principales_los_tres_totales_van_en_italica_sin_subrayar` (antes
+negrita), +1 nuevo (`test_tarjeta_estadisticas_principales_linea_en_
+blanco_antes_del_primer_subtitulo`). `tests/test_panel_control.py`:
++1 nuevo (`test_desglose_liquidaciones_aislada_cargada_en_fecha_de_
+feriado_cuenta_como_feriado_trabajado`, dos aisladas del mismo
+profesional, una en fecha de feriado y otra no, verificando que cada
+una cae en la línea correcta). pyflakes limpio en los dos archivos de
+negocio/GUI y los dos de test tocados; suites `test_panel_control.py`
+(35 passed) y `test_gui_panel_control.py` (66 passed) sin regresiones.
+
