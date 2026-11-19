@@ -31,9 +31,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.gui.estilos import COLOR_ROJO
+from app.gui.pantallas.imagenes import _TablaConAnchoDinamico
 from app.gui.widgets.foco import excluir_tabla_del_tab
 from app.gui.widgets.foco import instalar_enter_avanza_foco
-from app.gui.widgets.items_tabla import item_numero
+from app.gui.widgets.items_tabla import item_centrado, item_numero
 from app.gui.widgets.orden_tabla import OrdenTabla
 from app.negocio.dias import periodo_actual, periodo_anterior
 from app.negocio.estadisticas import (
@@ -112,7 +113,7 @@ def _clave_orden(columna: int):
 
 
 def _llenar_fila(tabla: QTableWidget, fila_idx: int, f: FilaEstadistica) -> None:
-    tabla.setItem(fila_idx, 0, QTableWidgetItem(f.periodo))
+    tabla.setItem(fila_idx, 0, item_centrado(f.periodo))
     tabla.setItem(fila_idx, 1, item_numero(_texto_pct(f.ocupacion_pct)))
     tabla.setItem(fila_idx, 2, item_numero(_texto_horas(f.horas_regulares_semanales)))
     tabla.setItem(fila_idx, 3, _item_variacion(f.variacion_horas))
@@ -140,13 +141,37 @@ def _opciones_periodo(conn: sqlite3.Connection) -> list[str]:
     return periodos
 
 
-def _armar_tabla() -> QTableWidget:
-    tabla = QTableWidget()
+def _armar_tabla(al_redimensionar) -> QTableWidget:
+    # `_TablaConAnchoDinamico` (`app.gui.pantallas.imagenes`): pedido
+    # explícito de la clienta de reasignar anchos para aprovechar todo
+    # el ancho de pantalla en vez de dejarlas al ancho justo de
+    # `resizeColumnsToContents()` — necesita saber cada vez que la
+    # tabla cambia de tamaño (al construirse, y de nuevo si se
+    # redimensiona la ventana), ver `_ajustar_columnas`.
+    tabla = _TablaConAnchoDinamico(al_redimensionar)
     excluir_tabla_del_tab(tabla)
     tabla.setColumnCount(len(_COLUMNAS))
     tabla.setHorizontalHeaderLabels(_COLUMNAS)
     tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
     return tabla
+
+
+def _ajustar_columnas(tabla: QTableWidget) -> None:
+    """Las 11 columnas son de importancia pareja (mismo criterio que
+    `balance._armar_tabla`) — en vez de dejarlas al ancho justo de
+    `resizeColumnsToContents()` (que suele dejar un tramo sin usar a la
+    derecha del panel), el sobrante se reparte en partes iguales entre
+    las 11."""
+    tabla.resizeColumnsToContents()
+    cantidad = tabla.columnCount()
+    disponible = tabla.viewport().width()
+    sobrante = disponible - sum(tabla.columnWidth(c) for c in range(cantidad))
+    if sobrante <= 0:
+        return
+    extra = sobrante // cantidad
+    resto = sobrante - extra * cantidad
+    for columna in range(cantidad):
+        tabla.setColumnWidth(columna, tabla.columnWidth(columna) + extra + (1 if columna < resto else 0))
 
 
 # Mismos títulos que `_COLUMNAS`, sin el "\n" (ahí es para que el
@@ -264,7 +289,7 @@ class _PanelHistorialGeneral(QWidget):
         columna.addStretch()
         layout_externo.addWidget(panel_filtros)
 
-        self.tabla = _armar_tabla()
+        self.tabla = _armar_tabla(lambda: _ajustar_columnas(self.tabla))
         layout_externo.addWidget(self.tabla, stretch=1)
 
         self._orden = OrdenTabla(self.tabla, self.actualizar)
@@ -299,7 +324,7 @@ class _PanelHistorialGeneral(QWidget):
         self.tabla.setRowCount(len(self._filas))
         for fila_idx, f in enumerate(self._filas):
             _llenar_fila(self.tabla, fila_idx, f)
-        self.tabla.resizeColumnsToContents()
+        _ajustar_columnas(self.tabla)
 
 
 class _PanelEstadisticasVarias(QWidget):
@@ -388,7 +413,7 @@ class _PanelEstadisticasVarias(QWidget):
         columna.addStretch()
         layout_externo.addWidget(panel_filtros)
 
-        self.tabla = _armar_tabla()
+        self.tabla = _armar_tabla(lambda: _ajustar_columnas(self.tabla))
         layout_externo.addWidget(self.tabla, stretch=1)
 
         self._orden = OrdenTabla(self.tabla, self.actualizar)
@@ -506,4 +531,4 @@ class _PanelEstadisticasVarias(QWidget):
         self.tabla.setRowCount(len(self._filas))
         for fila_idx, f in enumerate(self._filas):
             _llenar_fila(self.tabla, fila_idx, f)
-        self.tabla.resizeColumnsToContents()
+        _ajustar_columnas(self.tabla)

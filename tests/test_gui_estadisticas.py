@@ -70,6 +70,39 @@ def test_las_dos_tablas_tienen_las_once_columnas(qtbot, conn):
         assert etiquetas == columnas
 
 
+def test_columna_periodo_centrada_en_las_dos_tablas(qtbot, conn):
+    """Pedido explícito de la clienta."""
+    from PySide6.QtCore import Qt
+
+    pantalla = PantallaEstadisticas(conn)
+    qtbot.addWidget(pantalla)
+    for tabla in (pantalla.panel_historial.tabla, pantalla.panel_varias.tabla):
+        assert tabla.rowCount() >= 1
+        assert tabla.item(0, 0).textAlignment() == Qt.AlignmentFlag.AlignCenter
+
+
+def test_anchos_de_columna_se_reparten_para_usar_todo_el_ancho_disponible(qtbot, conn):
+    """Pedido explícito de la clienta: "repartí para aprovechar todo el
+    ancho de pantalla" — las 11 columnas ya no quedan al ancho justo de
+    `resizeColumnsToContents()`, que suele dejar un tramo sin usar a la
+    derecha del panel. Mismo mecanismo que `imagenes._TablaConAncho
+    Dinamico`/`_ajustar_columnas`: se reparte el sobrante en partes
+    iguales entre las 11."""
+    pantalla = PantallaEstadisticas(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(2000, 600)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    for panel in (pantalla.panel_historial, pantalla.panel_varias):
+        tabla = panel.tabla
+        suma_columnas = sum(tabla.columnWidth(c) for c in range(tabla.columnCount()))
+        # Con la ventana bien ancha, el ancho repartido tiene que
+        # aprovechar prácticamente todo el viewport disponible (no
+        # quedarse en el ancho mínimo natural de cada columna).
+        assert suma_columnas >= tabla.viewport().width() - tabla.columnCount()
+
+
 # ------------------------------------------------------- Historial general
 
 

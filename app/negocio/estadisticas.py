@@ -485,7 +485,11 @@ def conteo_entidades(
     específico elegido — sin alcance, el conteo actual de todo el
     sistema. Ninguna de estas tablas guarda de baja lógica ni fecha de
     alta, así que esto es siempre el conteo ACTUAL, nunca uno histórico
-    (ver el docstring del módulo)."""
+    (ver el docstring del módulo). "Localidades" cuenta solo las que
+    afectan al espacio (con al menos un Edificio) — pedido explícito de
+    la clienta al notar que el total incluía también localidades
+    usadas únicamente por un `InmueblePersonal` (inmueble propio fuera
+    del negocio)."""
     if id_consultorio is not None:
         return 1, 1, 1, 1
     if id_unidad is not None:
@@ -518,7 +522,17 @@ def conteo_entidades(
         ).fetchone()["n"]
         return 1, cant_edificios, cant_unidades, cant_consultorios
     return (
-        conn.execute("SELECT COUNT(*) AS n FROM Localidad").fetchone()["n"],
+        # Pedido explícito de la clienta: "Localidades" cuenta solo las
+        # que afectan al espacio (con al menos un Edificio) — NO todas
+        # las filas de la tabla `Localidad`, que también puede tener
+        # localidades usadas únicamente por un `InmueblePersonal` (un
+        # inmueble propio fuera del negocio, sin relación con el
+        # espacio — ver `InmueblePersonal` en schema.sql). Mismo
+        # criterio que `app.negocio.balance._localidades_con_algun_
+        # edificio`, acá sin el bucket "Sin localidad" (no es una
+        # Localidad real para contar). `COUNT(DISTINCT ...)` ya
+        # descarta los `NULL` solo.
+        conn.execute("SELECT COUNT(DISTINCT IdLocalidad) AS n FROM Edificio").fetchone()["n"],
         conn.execute("SELECT COUNT(*) AS n FROM Edificio").fetchone()["n"],
         conn.execute("SELECT COUNT(*) AS n FROM Unidad").fetchone()["n"],
         conn.execute("SELECT COUNT(*) AS n FROM Consultorio").fetchone()["n"],

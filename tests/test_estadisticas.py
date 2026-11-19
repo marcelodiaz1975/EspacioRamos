@@ -7,6 +7,7 @@ from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.estadisticas import (
     calcular_ocupacion,
+    conteo_entidades,
     generar_snapshot,
     generar_snapshot_operacion_importante,
     historial_general,
@@ -221,3 +222,21 @@ def test_limpiar_snapshots_operacion_importante_antiguos_no_toca_los_mensuales(c
     borrados = limpiar_snapshots_operacion_importante_antiguos(conn, date(2026, 10, 4))
     assert borrados == 0
     assert obtener_repositorio(conn, "SnapshotMensual").listar(Periodo="2020-01") != []
+
+
+def test_conteo_entidades_localidades_solo_cuenta_las_que_afectan_al_espacio(conn):
+    """Pedido explícito de la clienta: tenía 3 Localidades cargadas (la
+    del único Edificio del espacio, más dos usadas solo por un
+    InmueblePersonal — un inmueble propio fuera del negocio, sin
+    relación con el espacio) y "Localidades" mostraba 3 en vez de 1."""
+    id_localidad_espacio = obtener_repositorio(conn, "Localidad").crear(Localidad="Con edificio")
+    id_localidad_personal_1 = obtener_repositorio(conn, "Localidad").crear(Localidad="Solo inmueble personal 1")
+    id_localidad_personal_2 = obtener_repositorio(conn, "Localidad").crear(Localidad="Solo inmueble personal 2")
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1", IdLocalidad=id_localidad_espacio)
+    obtener_repositorio(conn, "InmueblePersonal").crear(Direccion="Casa 1", IdLocalidad=id_localidad_personal_1)
+    obtener_repositorio(conn, "InmueblePersonal").crear(Direccion="Casa 2", IdLocalidad=id_localidad_personal_2)
+
+    cant_localidades, cant_edificios, _cant_unidades, _cant_consultorios = conteo_entidades(conn)
+
+    assert cant_localidades == 1
+    assert cant_edificios == 1
