@@ -307,6 +307,58 @@ def _ampliar_alcance_gasto_a_consultorio(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE GastoOperativo_viejo")
 
 
+def _ampliar_alcance_gasto_a_localidad(conn: sqlite3.Connection) -> None:
+    """"Gastos" de Balance del negocio (pedido explícito de la clienta):
+    un gasto extraordinario puede afectar a una Localidad entera, no
+    solo a Espacio general/Edificio/Unidad/Consultorio — mismo problema
+    que `_ampliar_alcance_gasto_a_consultorio` (el CHECK de `Alcance` no
+    admite un `ALTER TABLE` que lo ensanche), mismo patrón de solución
+    (tabla nueva con el CHECK ya correcto, copiar, reemplazar).
+    Idempotente: no hace nada si la tabla ya tiene `IdLocalidad` (ya
+    migrada). Corre DESPUÉS de `_ampliar_alcance_gasto_a_consultorio`
+    (`aplicar_migraciones`), así que una base vieja ya tiene
+    `IdConsultorio` para este punto."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'GastoOperativo'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(GastoOperativo)").fetchall()}
+    if "IdLocalidad" in columnas_existentes:
+        return
+    conn.execute("ALTER TABLE GastoOperativo RENAME TO GastoOperativo_viejo")
+    conn.execute(
+        """
+        CREATE TABLE GastoOperativo (
+            IdGasto INTEGER PRIMARY KEY AUTOINCREMENT,
+            Periodo TEXT NOT NULL,
+            Categoria TEXT,
+            Concepto TEXT,
+            Monto REAL NOT NULL,
+            Alcance TEXT CHECK (Alcance IN ('Espacio general','Localidad','Edificio','Unidad','Consultorio')),
+            IdLocalidad INTEGER REFERENCES Localidad(IdLocalidad),
+            IdEdificio INTEGER REFERENCES Edificio(IdEdificio),
+            IdUnidad INTEGER REFERENCES Unidad(IdUnidad),
+            IdConsultorio INTEGER REFERENCES Consultorio(IdConsultorio),
+            Origen TEXT CHECK (Origen IN ('Manual','Importado')),
+            Observacion TEXT,
+            CampoLibre1 TEXT,
+            CampoLibre2 TEXT,
+            CampoLibre3 TEXT
+        )
+        """
+    )
+    columnas_comunes = [c for c in (
+        "IdGasto", "Periodo", "Categoria", "Concepto", "Monto", "Alcance", "IdEdificio", "IdUnidad",
+        "IdConsultorio", "Origen", "Observacion", "CampoLibre1", "CampoLibre2", "CampoLibre3",
+    ) if c in columnas_existentes]
+    columnas_sql = ", ".join(columnas_comunes)
+    conn.execute(
+        f"INSERT INTO GastoOperativo ({columnas_sql}) SELECT {columnas_sql} FROM GastoOperativo_viejo"
+    )
+    conn.execute("DROP TABLE GastoOperativo_viejo")
+
+
 def _inicializar_ultimo_backup_propio(conn: sqlite3.Connection) -> None:
     """Detección de base local desactualizada
     (`app.negocio.backup.hay_backup_mas_reciente_sin_sincronizar`): una
@@ -679,6 +731,7 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _agregar_nivel_supervisor_general(conn)
     _clasificar_subtipo_deposito_llave(conn)
     _ampliar_alcance_gasto_a_consultorio(conn)
+    _ampliar_alcance_gasto_a_localidad(conn)
     _inicializar_ultimo_backup_propio(conn)
     _inicializar_periodo_operativo_actual(conn)
     _permitir_profesional_sin_apellido(conn)

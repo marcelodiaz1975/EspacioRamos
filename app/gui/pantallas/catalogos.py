@@ -1,7 +1,11 @@
 """Pantallas de catálogo (Localidades, Edificios, Unidades, Consultorios,
 Responsables, Tipos de licencia, Listas editables, Condiciones y normas,
-Profesiones, Gastos operativos, Placas, Fechas especiales) — todas
-construidas sobre PantallaCRUD, sin código bespoke por tabla.
+Profesiones, Placas, Fechas especiales) — todas construidas sobre
+PantallaCRUD, sin código bespoke por tabla. ("Gastos operativos" tenía
+su propia pantalla acá, armada con este mismo mecanismo genérico —
+rediseño completo a pedido de la clienta, ahora vive como panel
+bespoke en `app.gui.pantallas.balance._PanelGastos`, la solapa "Gastos"
+de "Balance del negocio".)
 ("Mensajes predefinidos" vive aparte, en mensajes_predefinidos.py — tiene
 filtro y vista previa propios, sección 5.5. El esquema de descuentos NO
 tiene pantalla de catálogo propia — se maneja y se visualiza únicamente
@@ -11,10 +15,9 @@ from __future__ import annotations
 
 import sqlite3
 
-from PySide6.QtWidgets import QFrame, QLabel, QLineEdit, QMessageBox, QTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QMessageBox, QTextEdit, QVBoxLayout, QWidget
 
 from app.gui.crud_generico import Campo, PantallaCRUD, campos_libres
-from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.procesando import Procesando
 from app.negocio.archivos_generados import (
     nombre_carpeta_consultorio,
@@ -28,9 +31,7 @@ from app.negocio.archivos_generados import (
 )
 from app.negocio.dias import periodo_actual
 from app.negocio.feriados import TIPOS_QUE_DESCUENTAN_100
-from app.negocio.formato import formatear_moneda
 from app.negocio.aumentos import cantidad_liquidaciones_a_regenerar
-from app.negocio.gastos_operativos import ALCANCES_GASTO, gasto_en_conflicto, sanear_alcance
 from app.negocio.condiciones_normas import reordenar_al_guardar as reordenar_condiciones_al_guardar
 from app.negocio.detalles_complementarios import reordenar_al_guardar as reordenar_detalles_al_guardar
 from app.negocio.liquidaciones import regenerar_si_corresponde
@@ -40,10 +41,8 @@ from app.pdf.estilos import clave_orden_unidad
 from app.negocio.validaciones import (
     FORMATO_DIA_MES,
     FORMATO_EMAIL,
-    FORMATO_PERIODO,
     es_dia_mes_valido,
     es_email_valido,
-    es_periodo_valido,
 )
 from app.repositorio.registro import obtener_repositorio
 
@@ -456,165 +455,6 @@ def pantalla_profesiones(conn: sqlite3.Connection, *, anidado: bool = False) -> 
         *campos_libres(conn),
     ]
     return PantallaCRUD(conn, "Profesion", "Profesiones", campos, anidado=anidado)
-
-
-def _opciones_edificio_o_ninguno_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
-    return [(None, "Sin relación a edificio específico")] + _opciones_edificio(conn)
-
-
-def _opciones_unidad_o_ninguna_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
-    return [(None, "Sin relación a unidad específica")] + _opciones_unidad(conn)
-
-
-def _opciones_consultorio_o_ninguno_gasto(conn: sqlite3.Connection) -> list[tuple[int | None, str]]:
-    return [(None, "Sin relación a consultorio específico")] + _opciones_consultorio(conn)
-
-
-def _titulo_subtotal_periodo(periodo: str) -> str:
-    """"Subtotal gastos período 09-2026": el período se guarda como
-    AAAA-MM (`es_periodo_valido`) pero acá se muestra invertido, MM-AAAA
-    (pedido de la clienta) — si el texto tipeado en el filtro todavía no
-    tiene ese formato (mientras se está escribiendo), se muestra tal
-    cual en vez de romper."""
-    partes = periodo.split("-")
-    if len(partes) == 2:
-        anio, mes = partes
-        return f"Subtotal gastos período {mes}-{anio}"
-    return f"Subtotal gastos período {periodo}"
-
-
-def _al_abrir_dialogo_gasto(dialogo) -> None:
-    """El Alcance (Espacio general/Edificio/Unidad/Consultorio) define
-    cuál de los otros tres combos aplica: los que no corresponden quedan
-    deshabilitados y se limpian, para que nunca convivan un Alcance
-    "Espacio general" con un Edificio cargado (o análogo) — mismo
-    criterio de fondo que `gastos_operativos.sanear_alcance`, que hace la
-    misma limpieza del lado de los datos por si el gasto se termina
-    cargando por otra vía (ej. una futura importación) que no pase por
-    este diálogo."""
-    combo_alcance = dialogo._entradas["Alcance"]
-    combo_edificio = dialogo._entradas["IdEdificio"]
-    combo_unidad = dialogo._entradas["IdUnidad"]
-    combo_consultorio = dialogo._entradas["IdConsultorio"]
-
-    def _actualizar(*_args) -> None:
-        alcance = combo_alcance.currentData()
-        combo_edificio.setEnabled(alcance == "Edificio")
-        combo_unidad.setEnabled(alcance == "Unidad")
-        combo_consultorio.setEnabled(alcance == "Consultorio")
-        if alcance != "Edificio":
-            combo_edificio.setCurrentIndex(0)
-        if alcance != "Unidad":
-            combo_unidad.setCurrentIndex(0)
-        if alcance != "Consultorio":
-            combo_consultorio.setCurrentIndex(0)
-
-    combo_alcance.currentIndexChanged.connect(_actualizar)
-    _actualizar()
-
-
-def pantalla_gastos_operativos(conn: sqlite3.Connection, *, anidado: bool = False) -> PantallaCRUD:
-    def opciones_alcance(c):
-        return [(a, a) for a in ALCANCES_GASTO]
-
-    def opciones_origen(c):
-        return [("Manual", "Manual"), ("Importado", "Importado")]
-
-    campos = [
-        Campo(
-            "Periodo", "Período (AAAA-MM)", requerido=True,
-            validador=es_periodo_valido, formato_esperado=FORMATO_PERIODO,
-        ),
-        Campo("Categoria", "Categoría", tipo="combo", opciones=opciones_lista("CategoriaGasto"), combo_editable=True),
-        Campo("Concepto", "Concepto"),
-        Campo("Monto", "Monto", tipo="numero", requerido=True, es_monto=True),
-        Campo("Alcance", "Alcance", tipo="combo", opciones=opciones_alcance),
-        Campo("IdEdificio", "Edificio", tipo="combo", opciones=_opciones_edificio_o_ninguno_gasto),
-        Campo("IdUnidad", "Unidad", tipo="combo", opciones=_opciones_unidad_o_ninguna_gasto),
-        Campo("IdConsultorio", "Consultorio", tipo="combo", opciones=_opciones_consultorio_o_ninguno_gasto),
-        Campo("Origen", "Origen", tipo="combo", opciones=opciones_origen),
-        Campo("Observacion", "Observación", tipo="texto_largo"),
-        *campos_libres(conn),
-    ]
-
-    panel_periodo = QWidget()
-    layout_periodo = QVBoxLayout(panel_periodo)
-    layout_periodo.setContentsMargins(0, 0, 0, 0)
-    layout_periodo.addWidget(_titulo_campo("Período actual"))
-    campo_periodo_filtro = QLineEdit()
-    campo_periodo_filtro.setText(periodo_actual(conn))
-    layout_periodo.addWidget(campo_periodo_filtro)
-
-    panel_subtotal = QWidget()
-    layout_subtotal = QVBoxLayout(panel_subtotal)
-    layout_subtotal.setContentsMargins(0, 0, 0, 0)
-    layout_subtotal.addWidget(_linea_divisoria())
-    etiqueta_titulo_subtotal = _titulo_campo("")
-    layout_subtotal.addWidget(etiqueta_titulo_subtotal)
-    etiqueta_subtotal = QLabel()
-    layout_subtotal.addWidget(etiqueta_subtotal)
-    layout_subtotal.addStretch()
-
-    pantalla = PantallaCRUD(
-        conn, "GastoOperativo", "Gastos operativos", campos, al_abrir_dialogo=_al_abrir_dialogo_gasto,
-        panel_extra_superior_izquierda=panel_periodo, panel_extra_izquierda=panel_subtotal,
-        instalar_foco=False, anidado=anidado,
-    )
-    pantalla.al_guardar = lambda valores, registro: _resolver_conflicto_gasto(pantalla, conn, valores, registro)
-    # instalar_foco=False acá arriba: esta pantalla arma su propia cadena
-    # de Enter/Tab-avanza-foco (igual criterio que Llaves) para meter
-    # "Período actual" entre Buscar y Nuevo, en vez de que PantallaCRUD
-    # instale la suya de siempre (que no conoce ese campo extra) — dos
-    # filtros de evento distintos sobre los mismos botones no puede ser.
-    pantalla._foco = instalar_enter_avanza_foco(
-        [pantalla.campo_buscar, campo_periodo_filtro, pantalla.boton_nuevo, pantalla.boton_editar, pantalla.boton_eliminar],
-        parent=pantalla,
-    )
-
-    def _aplicar_filtro_periodo() -> None:
-        periodo = campo_periodo_filtro.text().strip() or periodo_actual(conn)
-        tabla = pantalla.tabla_widget
-        for fila in range(tabla.rowCount()):
-            item_periodo = tabla.item(fila, 0)
-            texto = item_periodo.text() if item_periodo else ""
-            tabla.setRowHidden(fila, texto != periodo)
-        gastos_del_periodo = obtener_repositorio(conn, "GastoOperativo").listar(Periodo=periodo)
-        subtotal = sum(g["Monto"] or 0 for g in gastos_del_periodo)
-        etiqueta_titulo_subtotal.setText(_titulo_subtotal_periodo(periodo))
-        etiqueta_subtotal.setText(formatear_moneda(subtotal))
-
-    campo_periodo_filtro.editingFinished.connect(_aplicar_filtro_periodo)
-    actualizar_original = pantalla.actualizar
-
-    def _actualizar_con_periodo() -> None:
-        actualizar_original()
-        _aplicar_filtro_periodo()
-
-    pantalla.actualizar = _actualizar_con_periodo
-    pantalla.actualizar()
-    return pantalla
-
-
-def _resolver_conflicto_gasto(parent, conn: sqlite3.Connection, valores: dict, registro) -> dict | None:
-    valores = sanear_alcance(valores)
-    id_actual = registro["IdGasto"] if registro is not None else None
-    conflicto = gasto_en_conflicto(
-        conn, periodo=valores.get("Periodo"), concepto=valores.get("Concepto"),
-        origen=valores.get("Origen"), id_gasto_actual=id_actual,
-    )
-    if conflicto is None:
-        return valores
-    respuesta = QMessageBox.question(
-        parent, "Conflicto de origen",
-        f"Ya existe un gasto operativo \"{conflicto['Concepto']}\" del período {conflicto['Periodo']} con "
-        f"origen \"{conflicto['Origen']}\" ({formatear_moneda(conflicto['Monto'])}). No pueden convivir un origen Manual "
-        f"y uno Importado para el mismo concepto y período.\n\n¿Reemplazarlo por este nuevo valor "
-        f"(\"{valores.get('Origen')}\")?",
-    )
-    if respuesta != QMessageBox.StandardButton.Yes:
-        return None
-    obtener_repositorio(conn, "GastoOperativo").eliminar(conflicto["IdGasto"])
-    return valores
 
 
 def _afecta_periodo_actual(conn: sqlite3.Connection, fecha: str | None) -> bool:

@@ -179,6 +179,28 @@ def test_total_gastos_periodo_espacio_general_se_reparte_en_cascada_completa_por
     assert total_gastos_periodo(conn, PERIODO) == pytest.approx(4000.0)
 
 
+def test_total_gastos_periodo_alcance_localidad_se_reparte_en_cascada_acotada_a_esa_localidad(conn):
+    """Pedido explícito de la clienta: un gasto de Localidad arranca la
+    misma cascada que "Espacio general" (reparto en partes iguales por
+    Edificio, Unidad, Consultorio), pero UN ESCALÓN más abajo — nunca
+    toca a otra Localidad."""
+    id_loc = obtener_repositorio(conn, "Localidad").crear(Localidad="Ramos Mejía")
+    otra_localidad = obtener_repositorio(conn, "Localidad").crear(Localidad="Otra")
+    _, _, (cons_a,) = _edificio_unidad_consultorio(conn, "Ramos 1", id_localidad=id_loc)
+    _, _, (cons_b,) = _edificio_unidad_consultorio(conn, "Ramos 2", id_localidad=id_loc)
+    _, _, (cons_otra,) = _edificio_unidad_consultorio(conn, "Otro edificio", id_localidad=otra_localidad)
+    obtener_repositorio(conn, "GastoOperativo").crear(
+        Periodo=PERIODO, Categoria="Publicidad", Monto=2000, Alcance="Localidad", IdLocalidad=id_loc,
+    )
+    assert total_gastos_periodo(conn, PERIODO, id_consultorio=cons_a) == pytest.approx(1000.0)
+    assert total_gastos_periodo(conn, PERIODO, id_consultorio=cons_b) == pytest.approx(1000.0)
+    assert total_gastos_periodo(conn, PERIODO, id_consultorio=cons_otra) == 0.0
+    assert total_gastos_periodo(conn, PERIODO, id_localidad=id_loc) == pytest.approx(2000.0)
+    assert total_gastos_periodo(conn, PERIODO, id_localidad=otra_localidad) == 0.0
+    # Sin ningún filtro, se suma el gasto entero, sin prorratear nada.
+    assert total_gastos_periodo(conn, PERIODO) == pytest.approx(2000.0)
+
+
 def test_total_gastos_periodo_rama_sin_hijos_no_reparte_nada(conn):
     """Un Edificio cargado sin ninguna Unidad todavía: la porción que le
     tocaría no llega a ningún Consultorio (se pierde) — consistente con

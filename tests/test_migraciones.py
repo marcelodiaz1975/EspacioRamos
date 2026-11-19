@@ -340,6 +340,44 @@ def test_aplicar_migraciones_agrega_consultorio_y_amplia_alcance_de_gasto_operat
     conn.close()
 
 
+def test_aplicar_migraciones_agrega_localidad_y_amplia_alcance_de_gasto_operativo_viejo(tmp_path):
+    """"Gastos" de Balance del negocio (pedido explícito de la clienta):
+    una base vieja de GastoOperativo (CHECK de Alcance con los cuatro
+    valores de ANTES de sumar Localidad, sin IdLocalidad) gana la
+    columna nueva Y el CHECK ensanchado — mismo patrón que la migración
+    de Consultorio (`_ampliar_alcance_gasto_a_localidad`)."""
+    conn = sqlite3.connect(tmp_path / "vieja.db")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE GastoOperativo (IdGasto INTEGER PRIMARY KEY AUTOINCREMENT, Periodo TEXT NOT NULL, "
+        "Categoria TEXT, Concepto TEXT, Monto REAL NOT NULL, "
+        "Alcance TEXT CHECK (Alcance IN ('Espacio general','Edificio','Unidad','Consultorio')), "
+        "IdEdificio INTEGER, IdUnidad INTEGER, IdConsultorio INTEGER, Origen TEXT, Observacion TEXT, "
+        "CampoLibre1 TEXT, CampoLibre2 TEXT, CampoLibre3 TEXT)"
+    )
+    conn.execute(
+        "INSERT INTO GastoOperativo (Periodo, Categoria, Concepto, Monto, Alcance, IdEdificio) "
+        "VALUES ('2026-08', 'Limpieza', 'Limpieza edificio', 1000, 'Edificio', 3)"
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    columnas = {f["name"] for f in conn.execute("PRAGMA table_info(GastoOperativo)").fetchall()}
+    assert "IdLocalidad" in columnas
+    fila = conn.execute("SELECT * FROM GastoOperativo WHERE Concepto = 'Limpieza edificio'").fetchone()
+    assert fila["Monto"] == 1000
+    assert fila["Alcance"] == "Edificio"
+    assert fila["IdEdificio"] == 3
+    assert fila["IdLocalidad"] is None
+    # el CHECK ya admite 'Localidad' — antes de la migración esto fallaba
+    conn.execute(
+        "INSERT INTO GastoOperativo (Periodo, Concepto, Monto, Alcance, IdLocalidad) "
+        "VALUES ('2026-08', 'Publicidad', 500, 'Localidad', 7)"
+    )
+    conn.close()
+
+
 def test_aplicar_migraciones_es_idempotente_para_gasto_operativo(tmp_path):
     conn = sqlite3.connect(tmp_path / "vieja.db")
     conn.row_factory = sqlite3.Row

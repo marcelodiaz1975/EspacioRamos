@@ -29,7 +29,6 @@ _FABRICAS = [
     catalogos.pantalla_condiciones_normas,
     catalogos.pantalla_detalles_complementarios_propuesta,
     catalogos.pantalla_profesiones,
-    catalogos.pantalla_gastos_operativos,
     catalogos.pantalla_fechas_especiales,
 ]
 
@@ -296,16 +295,6 @@ def test_editar_unidad_cambia_departamento_renombra_carpeta_de_imagenes(qtbot, c
     assert not carpeta_vieja.exists()
 
 
-def test_pantalla_gastos_operativos_muestra_alcance(qtbot, conn):
-    conn.execute(
-        "INSERT INTO GastoOperativo (Periodo, Concepto, Monto, Alcance) VALUES ('2026-08', 'Limpieza', 5000, 'Espacio general')"
-    )
-    conn.commit()
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    assert pantalla.tabla_widget.item(0, 4).text() == "Espacio general"
-
-
 def test_fechas_especiales_tipo_es_combo_cerrado(qtbot, conn):
     """Sección 3.17 + 8.2: el Tipo tiene que salir de ListasEditables, no
     ser texto libre — feriados.py compara por string exacto, un typo acá
@@ -482,8 +471,7 @@ def test_campos_libres_apagados_los_saca_de_todos_los_catalogos(qtbot, conn):
         catalogos.pantalla_localidades, catalogos.pantalla_edificios, catalogos.pantalla_unidades,
         catalogos.pantalla_consultorios, catalogos.pantalla_responsables, catalogos.pantalla_tipos_licencia,
         catalogos.pantalla_condiciones_normas, catalogos.pantalla_detalles_complementarios_propuesta,
-        catalogos.pantalla_profesiones, catalogos.pantalla_gastos_operativos,
-        catalogos.pantalla_listas_editables,
+        catalogos.pantalla_profesiones, catalogos.pantalla_listas_editables,
     ]:
         pantalla = fabrica(conn)
         qtbot.addWidget(pantalla)
@@ -597,15 +585,6 @@ def test_pantalla_profesiones_tiene_campo_dia_profesion_validado(qtbot, conn):
     assert campo.validador("no es una fecha") is False
 
 
-def test_pantalla_gastos_operativos_tiene_tres_campos_libres(qtbot, conn):
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    nombres = [c.nombre for c in pantalla.campos]
-    assert nombres.count("CampoLibre1") == 1
-    assert nombres.count("CampoLibre2") == 1
-    assert nombres.count("CampoLibre3") == 1
-
-
 def test_pantalla_listas_editables_tiene_tres_campos_libres(qtbot, conn):
     pantalla = catalogos.pantalla_listas_editables(conn)
     qtbot.addWidget(pantalla)
@@ -613,213 +592,6 @@ def test_pantalla_listas_editables_tiene_tres_campos_libres(qtbot, conn):
     assert nombres.count("CampoLibre1") == 1
     assert nombres.count("CampoLibre2") == 1
     assert nombres.count("CampoLibre3") == 1
-
-
-def test_gasto_categoria_es_combo_editable_con_valores_de_listas_editables(qtbot, conn):
-    obtener_repositorio(conn, "ListasEditables").crear(TipoLista="CategoriaGasto", Valor="Servicios", Orden=0)
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
-    qtbot.addWidget(dialogo)
-    combo_categoria = dialogo._entradas["Categoria"]
-    assert combo_categoria.isEditable() is True
-    opciones = [combo_categoria.itemText(i) for i in range(combo_categoria.count())]
-    assert opciones == ["Servicios"]
-    combo_categoria.setEditText("Categoría inventada")
-    assert dialogo.valores()["Categoria"] == "Categoría inventada"
-
-
-def test_gasto_alcance_edificio_habilita_solo_edificio(qtbot, conn):
-    obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
-    qtbot.addWidget(dialogo)
-    catalogos._al_abrir_dialogo_gasto(dialogo)
-
-    combo_alcance = dialogo._entradas["Alcance"]
-    combo_edificio = dialogo._entradas["IdEdificio"]
-    combo_unidad = dialogo._entradas["IdUnidad"]
-    combo_consultorio = dialogo._entradas["IdConsultorio"]
-
-    combo_alcance.setCurrentIndex(combo_alcance.findData("Edificio"))
-    assert combo_edificio.isEnabled() is True
-    assert combo_unidad.isEnabled() is False
-    assert combo_unidad.currentData() is None
-    assert combo_consultorio.isEnabled() is False
-    assert combo_consultorio.currentData() is None
-
-    combo_alcance.setCurrentIndex(combo_alcance.findData("Espacio general"))
-    assert combo_edificio.isEnabled() is False
-    assert combo_edificio.currentData() is None
-
-
-def test_gasto_alcance_consultorio_habilita_solo_consultorio(qtbot, conn):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
-    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
-    obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
-    qtbot.addWidget(dialogo)
-    catalogos._al_abrir_dialogo_gasto(dialogo)
-
-    combo_alcance = dialogo._entradas["Alcance"]
-    combo_edificio = dialogo._entradas["IdEdificio"]
-    combo_unidad = dialogo._entradas["IdUnidad"]
-    combo_consultorio = dialogo._entradas["IdConsultorio"]
-
-    combo_alcance.setCurrentIndex(combo_alcance.findData("Consultorio"))
-    assert combo_consultorio.isEnabled() is True
-    assert combo_edificio.isEnabled() is False
-    assert combo_edificio.currentData() is None
-    assert combo_unidad.isEnabled() is False
-    assert combo_unidad.currentData() is None
-
-    opciones = [combo_consultorio.itemText(i) for i in range(combo_consultorio.count())]
-    assert opciones[0] == "Sin relación a consultorio específico"
-    assert any("Consultorio 1" in o for o in opciones)
-
-    combo_alcance.setCurrentIndex(combo_alcance.findData("Unidad"))
-    assert combo_consultorio.isEnabled() is False
-    assert combo_consultorio.currentData() is None
-
-
-def test_gasto_periodo_filtro_arranca_en_el_periodo_actual(qtbot, conn):
-    from PySide6.QtWidgets import QLineEdit
-
-    from app.negocio.dias import periodo_actual
-
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    campo_periodo_filtro = next(w for w in pantalla.findChildren(QLineEdit) if w.text() == periodo_actual(conn))
-    assert campo_periodo_filtro.text() == periodo_actual(conn)
-
-
-def test_gasto_periodo_filtro_oculta_otros_periodos_y_calcula_subtotal(qtbot, conn):
-    from PySide6.QtWidgets import QLabel, QLineEdit
-
-    from app.negocio.dias import periodo_actual
-    from app.negocio.formato import formatear_moneda
-
-    periodo = periodo_actual(conn)
-    obtener_repositorio(conn, "GastoOperativo").crear(Periodo=periodo, Concepto="Luz", Monto=1000, Origen="Manual")
-    obtener_repositorio(conn, "GastoOperativo").crear(Periodo=periodo, Concepto="Agua", Monto=500, Origen="Manual")
-    obtener_repositorio(conn, "GastoOperativo").crear(Periodo="2020-01", Concepto="Viejo", Monto=999, Origen="Manual")
-
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-
-    tabla = pantalla.tabla_widget
-    ocultas = [tabla.isRowHidden(f) for f in range(tabla.rowCount())]
-    periodos_filas = [tabla.item(f, 0).text() for f in range(tabla.rowCount())]
-    for oculta, per in zip(ocultas, periodos_filas):
-        assert oculta == (per != periodo)
-
-    etiquetas = [w for w in pantalla.findChildren(QLabel) if w.text() == formatear_moneda(1500)]
-    assert etiquetas, "no se encontró la etiqueta con el subtotal esperado"
-
-    campo_periodo_filtro = next(w for w in pantalla.findChildren(QLineEdit) if w.text() == periodo)
-    campo_periodo_filtro.setText("2020-01")
-    campo_periodo_filtro.editingFinished.emit()
-
-    etiquetas = [w for w in pantalla.findChildren(QLabel) if w.text() == formatear_moneda(999)]
-    assert etiquetas, "no se actualizó el subtotal al cambiar el período"
-
-
-def test_gasto_titulo_subtotal_muestra_el_periodo_invertido_mm_aaaa(qtbot, conn):
-    from PySide6.QtWidgets import QLabel, QLineEdit
-
-    from app.negocio.dias import periodo_actual
-
-    periodo = periodo_actual(conn)
-    anio, mes = periodo.split("-")
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-
-    etiquetas = [w for w in pantalla.findChildren(QLabel) if w.text() == f"Subtotal gastos período {mes}-{anio}"]
-    assert etiquetas, "no se encontró el título del subtotal con el período actual"
-
-    campo_periodo_filtro = next(w for w in pantalla.findChildren(QLineEdit) if w.text() == periodo)
-    campo_periodo_filtro.setText("2020-01")
-    campo_periodo_filtro.editingFinished.emit()
-
-    etiquetas = [w for w in pantalla.findChildren(QLabel) if w.text() == "Subtotal gastos período 01-2020"]
-    assert etiquetas, "el título del subtotal no se actualizó al cambiar el período"
-
-
-def test_gasto_edificio_unidad_texto_de_sin_relacion(qtbot, conn):
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    dialogo = _DialogoRegistro(conn, pantalla.campos, "Nuevo registro")
-    qtbot.addWidget(dialogo)
-    assert dialogo._entradas["IdEdificio"].itemText(0) == "Sin relación a edificio específico"
-    assert dialogo._entradas["IdUnidad"].itemText(0) == "Sin relación a unidad específica"
-    assert dialogo._entradas["IdConsultorio"].itemText(0) == "Sin relación a consultorio específico"
-
-
-def test_gasto_columna_consultorio_queda_despues_de_unidad(qtbot, conn):
-    """Pedido explícito de la clienta: una columna "Consultorio" en la
-    tabla, justo después de "Unidad"."""
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    etiquetas = [c.etiqueta for c in pantalla.campos]
-    assert etiquetas.index("Consultorio") == etiquetas.index("Unidad") + 1
-
-
-def test_gasto_consultorio_se_guarda_y_se_lee(qtbot, conn):
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Torre Norte")
-    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
-    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=2)
-    id_gasto = obtener_repositorio(conn, "GastoOperativo").crear(
-        Periodo="2026-08", Concepto="Pintura", Monto=800, Alcance="Consultorio", IdConsultorio=id_consultorio,
-    )
-    gasto = obtener_repositorio(conn, "GastoOperativo").obtener(id_gasto)
-    assert gasto["IdConsultorio"] == id_consultorio
-    assert gasto["IdEdificio"] is None
-    assert gasto["IdUnidad"] is None
-
-
-def test_gasto_cadena_de_foco_incluye_periodo_actual_y_da_la_vuelta(qtbot, conn):
-    from PySide6.QtWidgets import QLineEdit
-
-    from app.negocio.dias import periodo_actual
-
-    obtener_repositorio(conn, "GastoOperativo").crear(
-        Periodo=periodo_actual(conn), Concepto="Pintura", Monto=800, Alcance="Espacio general",
-    )
-    conn.commit()
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-    campo_periodo_filtro = next(w for w in pantalla.findChildren(QLineEdit) if w.text() == periodo_actual(conn))
-
-    orden = pantalla._foco._orden
-    assert orden == [
-        pantalla.campo_buscar, campo_periodo_filtro, pantalla.boton_nuevo, pantalla.boton_editar, pantalla.boton_eliminar,
-    ]
-
-    pantalla.tabla_widget.selectRow(0)  # Editar/Eliminar solo reciben foco con una fila seleccionada
-    pantalla.boton_eliminar.setFocus()
-    qtbot.waitUntil(lambda: pantalla.boton_eliminar.hasFocus())
-    pantalla._foco._mover(pantalla.boton_eliminar, retroceder=False, seleccionar_todo=False)
-    qtbot.waitUntil(lambda: pantalla.campo_buscar.hasFocus())
-
-
-def test_gasto_manual_puede_cambiar_a_importado_en_cualquier_momento(conn):
-    """Pedido de la clienta: un gasto cargado manualmente tiene que poder
-    pasar a origen Importado en cualquier momento, editándolo — no puede
-    quedar bloqueado por su propio conflicto (mismo Periodo+Concepto)."""
-    id_gasto = obtener_repositorio(conn, "GastoOperativo").crear(
-        Periodo="2026-09", Concepto="Luz", Monto=1000, Origen="Manual",
-    )
-    registro = obtener_repositorio(conn, "GastoOperativo").obtener(id_gasto)
-    valores = catalogos._resolver_conflicto_gasto(
-        None, conn, {"Periodo": "2026-09", "Concepto": "Luz", "Origen": "Importado"}, registro,
-    )
-    assert valores is not None
-    assert valores["Origen"] == "Importado"
 
 
 def test_pantalla_responsables_tiene_tres_campos_libres(qtbot, conn):
@@ -920,90 +692,6 @@ def test_responsables_rol_es_combo_editable(qtbot, conn):
     assert dialogo.valores()["Rol"] == "Rol inventado"
 
 
-def _completar_gasto(periodo="2026-08", concepto="Limpieza", monto="1000", origen=None):
-    def _completar(self, *a, **k):
-        self._entradas["Periodo"].setText(periodo)
-        self._entradas["Concepto"].setText(concepto)
-        self._entradas["Monto"].setText(monto)
-        if origen is not None:
-            self._entradas["Origen"].setCurrentIndex(self._entradas["Origen"].findData(origen))
-        return QDialog.DialogCode.Accepted
-    return _completar
-
-
-def test_gasto_operativo_sin_conflicto_se_guarda(qtbot, conn, monkeypatch):
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    monkeypatch.setattr("app.gui.crud_generico._DialogoRegistro.exec", _completar_gasto())
-
-    pantalla._nuevo()
-
-    gastos = obtener_repositorio(conn, "GastoOperativo").listar()
-    assert len(gastos) == 1
-    assert gastos[0]["Origen"] == "Manual"
-
-
-def test_gasto_operativo_conflicto_confirmado_reemplaza(qtbot, conn, monkeypatch):
-    """Sección 3.25: "Si existe valor para mismo concepto y período de
-    otro origen: obliga a elegir entre uno u otro" — confirmar reemplaza
-    el existente."""
-    id_anterior = obtener_repositorio(conn, "GastoOperativo").crear(
-        Periodo="2026-08", Concepto="Limpieza", Monto=500, Origen="Manual",
-    )
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    monkeypatch.setattr(
-        "app.gui.crud_generico._DialogoRegistro.exec", _completar_gasto(monto="800", origen="Importado"),
-    )
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
-
-    pantalla._nuevo()
-
-    gastos = obtener_repositorio(conn, "GastoOperativo").listar()
-    assert len(gastos) == 1
-    assert gastos[0]["Origen"] == "Importado"
-    assert gastos[0]["Monto"] == 800
-    assert obtener_repositorio(conn, "GastoOperativo").obtener(id_anterior) is None
-
-
-def test_gasto_operativo_conflicto_cancelado_no_guarda(qtbot, conn, monkeypatch):
-    id_anterior = obtener_repositorio(conn, "GastoOperativo").crear(
-        Periodo="2026-08", Concepto="Limpieza", Monto=500, Origen="Manual",
-    )
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    monkeypatch.setattr(
-        "app.gui.crud_generico._DialogoRegistro.exec", _completar_gasto(monto="800", origen="Importado"),
-    )
-    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
-
-    pantalla._nuevo()
-
-    gastos = obtener_repositorio(conn, "GastoOperativo").listar()
-    assert len(gastos) == 1
-    assert gastos[0]["IdGasto"] == id_anterior
-    assert gastos[0]["Monto"] == 500
-
-
-def test_gasto_operativo_mismo_origen_no_pregunta(qtbot, conn, monkeypatch):
-    obtener_repositorio(conn, "GastoOperativo").crear(
-        Periodo="2026-08", Concepto="Limpieza", Monto=500, Origen="Manual",
-    )
-    pantalla = catalogos.pantalla_gastos_operativos(conn)
-    qtbot.addWidget(pantalla)
-    monkeypatch.setattr(
-        "app.gui.crud_generico._DialogoRegistro.exec", _completar_gasto(monto="800", origen="Manual"),
-    )
-    preguntas = []
-    monkeypatch.setattr(
-        QMessageBox, "question",
-        staticmethod(lambda *a, **k: (preguntas.append(1), QMessageBox.StandardButton.Yes)[1]),
-    )
-
-    pantalla._nuevo()
-
-    assert preguntas == []
-    assert len(obtener_repositorio(conn, "GastoOperativo").listar()) == 2
 
 
 def _crear_profesional_r(conn, apellido="Gómez"):

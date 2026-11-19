@@ -174,12 +174,29 @@ def _distribuir_gasto_por_consultorio(conn: sqlite3.Connection, gasto: sqlite3.R
                 resultado[id_c] = resultado.get(id_c, 0.0) + m
         return resultado
 
+    def _por_localidad(id_localidad: int | None, monto_localidad: float) -> dict[int, float]:
+        edificios = _edificios_de_localidad(conn, id_localidad)
+        if not edificios:
+            return {}
+        porcion_edificio = monto_localidad / len(edificios)
+        resultado: dict[int, float] = {}
+        for id_edificio in edificios:
+            for id_c, m in _por_edificio(id_edificio, porcion_edificio).items():
+                resultado[id_c] = resultado.get(id_c, 0.0) + m
+        return resultado
+
     if alcance == "Consultorio":
         return {gasto["IdConsultorio"]: monto}
     if alcance == "Unidad":
         return _por_unidad(gasto["IdUnidad"], monto)
     if alcance == "Edificio":
         return _por_edificio(gasto["IdEdificio"], monto)
+    if alcance == "Localidad":
+        # Pedido explícito de la clienta: mismo reparto en cascada que
+        # "Espacio general", pero acotado a UNA localidad (la cascada
+        # arranca un escalón más abajo, en sus Edificios, en vez de
+        # repartir primero entre TODAS las localidades que haya).
+        return _por_localidad(gasto["IdLocalidad"], monto)
 
     # "Espacio general"
     localidades = _localidades_con_algun_edificio(conn)
@@ -188,13 +205,8 @@ def _distribuir_gasto_por_consultorio(conn: sqlite3.Connection, gasto: sqlite3.R
     porcion_localidad = monto / len(localidades)
     resultado: dict[int, float] = {}
     for id_localidad in localidades:
-        edificios = _edificios_de_localidad(conn, id_localidad)
-        if not edificios:
-            continue
-        porcion_edificio = porcion_localidad / len(edificios)
-        for id_edificio in edificios:
-            for id_c, m in _por_edificio(id_edificio, porcion_edificio).items():
-                resultado[id_c] = resultado.get(id_c, 0.0) + m
+        for id_c, m in _por_localidad(id_localidad, porcion_localidad).items():
+            resultado[id_c] = resultado.get(id_c, 0.0) + m
     return resultado
 
 

@@ -695,3 +695,100 @@ Suite completa de `test_gui_control_pagos.py` (incluye esta solapa y
 control_pagos.py`, `app/gui/pantallas/pagos.py` y los dos archivos de
 test tocados.
 
+## Balance del negocio: "Gastos" rediseño completo + nivel Afectación "Localidad" + Ingresos/Resultado/Estadísticas varios ajustes chicos
+
+Ronda grande, la solapa "Gastos" pasa de ser el catálogo genérico
+`catalogos.pantalla_gastos_operativos` (`PantallaCRUD`) a un panel
+bespoke (`_PanelGastos`, `app/gui/pantallas/balance.py`) — pedido
+explícito de la clienta de tratarla igual que el resto de las
+pantallas ya rediseñadas (Carga y control, Historial). El catálogo
+genérico queda eliminado (sin otro consumidor) junto a sus helpers
+privados (`_al_abrir_dialogo_gasto`, `_resolver_conflicto_gasto`,
+`_titulo_subtotal_periodo`, los tres `_opciones_*_o_ninguno_gasto`) —
+`_opciones_edificio`/`_opciones_unidad`/`_opciones_consultorio`/
+`_opciones_localidad` (sin el sufijo, plain) siguen en `catalogos.py`
+y ahora los importa `balance.py` (import cruzado de un símbolo
+privado, mismo criterio ya usado en el resto del sistema).
+
+### Nivel nuevo "Localidad" en Afectación/Alcance de un gasto
+
+Pedido explícito de la clienta: un gasto extraordinario puede afectar
+a una Localidad entera, no solo a Espacio general/Edificio/Unidad/
+Consultorio. `ALCANCES_GASTO` (`app.negocio.gastos_operativos`) suma
+"Localidad" (`sanear_alcance` actualizado para el quinto nivel).
+`GastoOperativo` suma la columna `IdLocalidad` — mismo problema que
+cuando se sumó Consultorio (el CHECK de `Alcance` no admite un `ALTER
+TABLE` que lo ensanche): `_ampliar_alcance_gasto_a_localidad`
+(`app.db.migraciones`) recrea la tabla entera, mismo patrón que
+`_ampliar_alcance_gasto_a_consultorio`, corre justo después de esa en
+`aplicar_migraciones`. `app.negocio.balance._distribuir_gasto_por_
+consultorio` suma la rama "Localidad": mismo reparto en cascada que
+"Espacio general" (Edificio→Unidad→Consultorio, partes iguales en
+cada escalón), pero acotado a UNA localidad — arranca un escalón más
+abajo en vez de repartir primero entre todas las que haya (se extrajo
+`_por_localidad` como helper interno, reusado por los dos casos).
+`texto_afectacion_gasto` (`gastos_operativos`, nueva) da el texto
+legible de la Afectación de un gasto para la tabla/filtros, los 5
+niveles — mismo criterio que `control_pagos.texto_afectacion`.
+
+### `_PanelGastos`/`_DialogoGasto` (`app/gui/pantallas/balance.py`)
+
+- Columnas de tabla, en este orden: Período, Nombre, Categoría,
+  Afectación, Monto, Origen, Observación — "Período" al ancho mínimo
+  que entra el título sin cortar (`QFontMetrics` + colchón, mismo
+  criterio que `control_pagos._PanelHistorialControlPagos`) y
+  centrado. Orden de filas: Período, Afectación, Categoría, Nombre.
+- Período con `SelectorPeriodo` (mismo widget que Ingresos/Resultado),
+  arranca en el período actual — reemplaza el `QLineEdit` de texto
+  libre que tenía el catálogo genérico.
+- Debajo de "Eliminar": línea divisoria, subtotal del período (en
+  NEGRITA, etiqueta e importe — pedido explícito; nunca lo tocan los
+  filtros de más abajo, solo el período elegido), otra línea
+  divisoria, título "Filtros" y los mismos cuatro filtros en cascada
+  mutua con sentinel "Todos/Todas" que ya usa la columna 4 de "Carga y
+  control" (Nombre/Categoría/Afectación, más "Origen" nuevo) + botón
+  "Reiniciar filtros" — estos filtros solo ocultan filas de la tabla,
+  nunca cambian el período cargado ni el subtotal (CLAUDE.md, "Filtros
+  que solo afectan la visualización").
+- "Nuevo"/"Editar" abren `_DialogoGasto`: Categoría ofrece las
+  categorías de Control de pagos (`CategoriaControlPagos`, antes
+  `CategoriaGasto`) en vez de las propias de Gastos; "Alcance" se
+  renombra "Afectación" y suma el selector de Localidad (cascada
+  igual a antes, extendida a 5 ramas: solo el combo que corresponde al
+  Alcance elegido queda habilitado); Origen siempre "Manual", sin
+  ningún combo para cambiarlo (un `QLabel` nomás) — lo Importado se
+  sincroniza solo desde "Carga y control" de Control de pagos
+  (`sincronizar_gasto_operativo`) y se edita desde ahí, nunca desde
+  "Gastos"; "Concepto" pasa a llamarse "Nombre" (dialogo y tabla).
+  "Editar" sobre un gasto con Origen "Importado" queda bloqueado con
+  una alerta explicando por qué (mismo patrón que la restricción de
+  "Editar registro" de "Historial" en la ronda anterior) — Eliminar NO
+  tiene esta restricción (no hay riesgo de pisar el Origen real).
+- El conflicto Manual/Importado (mismo Periodo+Concepto, Orígenes
+  distintos) se sigue resolviendo igual que el catálogo genérico
+  (`gasto_en_conflicto`, pregunta si reemplazar) — sigue siendo
+  relevante aunque "Nuevo" solo cree Manual, porque puede chocar
+  contra uno Importado ya sincronizado.
+- `reiniciar()` (F5): período al actual, filtros y selección a cero.
+  "Nuevo"/"Editar"/"Eliminar" muestran alerta de éxito.
+
+### Ingresos/Resultado
+
+Columna "Período" de la tabla pasa a centrada (`item_centrado` en vez
+de `QTableWidgetItem` simple) — pedido explícito, sin otro cambio
+(ya tenían `reiniciar()` y no tienen ningún botón que modifique
+datos, así que no les hacía falta ninguna alerta de éxito nueva).
+
+### Tests
+
+`tests/test_gastos_operativos.py` (+9: sanear_alcance con Localidad,
+texto_afectacion_gasto); `tests/test_migraciones.py` (+1: migración
+IdLocalidad); `tests/test_balance.py` (+1: prorrateo Localidad);
+`tests/test_catalogos.py` (removidos ~24 tests del catálogo genérico
+de baja); `tests/test_gui_balance.py` (+18: columnas/orden/ancho/
+centrado de Gastos, Nuevo/Editar/Eliminar/conflicto, filtros/subtotal/
+F5, diálogo, alertas de éxito, Período centrado en Ingresos/
+Resultado). pyflakes limpio en los nueve archivos tocados (`app/db/
+schema.sql`, `app/db/migraciones.py`, `app/negocio/gastos_operativos.
+py`, `app/negocio/balance.py`, `app/gui/pantallas/balance.py`,
+`app/gui/pantallas/catalogos.py`, y los cuatro de test).
