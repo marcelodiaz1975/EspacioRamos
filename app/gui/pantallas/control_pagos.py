@@ -14,11 +14,12 @@ import sqlite3
 from datetime import date
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QFontMetrics
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -93,6 +94,47 @@ _COLORES_CON_LETRA_NEGRA = {"amarillo"}
 # Tipos de Afectación que necesitan un combo de detalle (el resto,
 # "Espacio general"/"Familia", no apuntan a ningún registro puntual).
 _TIPOS_CON_DETALLE = ("Edificio", "Unidad", "Inmueble personal", "Rodado", "Persona")
+
+# Pedido explícito de la clienta: Vencimiento en "Carga y control"/
+# "Historial" sin el día de la semana (a diferencia de `_campo_fecha`/
+# `_campo_fecha_opcional`, usado en el resto del sistema con "ddd
+# dd-MM-yyyy") — mismo formato llano que ya usa `reservas._FORMATO_
+# FECHA` para otros campos de fecha que tampoco necesitan el día.
+_FORMATO_FECHA_SIN_DIA = "dd-MM-yyyy"
+
+# Ancho de columna justo para que entre un importe con este formato y
+# esta cantidad de caracteres (pedido explícito de la clienta, "Carga y
+# control"/"Historial") — medido con `QFontMetrics` sobre la fuente
+# real de la tabla, mismo criterio que `pagos._TEXTO_MONTO_MAXIMO`.
+_TEXTO_IMPORTE_MAXIMO = "$ 0.000.000,00"
+_PADDING_COLUMNA_IMPORTE = 10
+
+# Colchón para el padding interno que Qt le suma a la celda del
+# encabezado — mismo valor/criterio que `imagenes._COLCHON_TITULO_
+# COLUMNA` ("Historial", columnas "Período"/"Vencimiento" al mínimo que
+# entra el título sin cortar).
+_COLCHON_TITULO_COLUMNA = 12
+
+
+def _fecha_dd_mm_yyyy(fecha_iso: str) -> str:
+    """'2026-08-15' -> '15-08-2026' — texto de tabla para Vencimiento,
+    mismo formato que `_FORMATO_FECHA_SIN_DIA` en el `QDateEdit`."""
+    return date.fromisoformat(fecha_iso).strftime("%d-%m-%Y")
+
+
+def _linea_divisoria_vertical() -> QFrame:
+    linea = QFrame()
+    linea.setFrameShape(QFrame.Shape.VLine)
+    linea.setFrameShadow(QFrame.Shadow.Sunken)
+    return linea
+
+
+def _campo_vencimiento_sin_dia(conn: sqlite3.Connection):
+    """Como `_campo_fecha_opcional`, pero con el formato de Vencimiento
+    de esta pantalla (ver `_FORMATO_FECHA_SIN_DIA`)."""
+    campo = _campo_fecha_opcional(conn)
+    campo.setDisplayFormat(_FORMATO_FECHA_SIN_DIA)
+    return campo
 
 
 class _SpinImporteControlPagos(_SpinMonto):
@@ -239,7 +281,7 @@ class _DialogoEditarInstancia(QDialog):
         layout = QVBoxLayout(self)
 
         layout.addWidget(_titulo_campo("Vencimiento"))
-        self.campo_vencimiento = _campo_fecha_opcional(conn)
+        self.campo_vencimiento = _campo_vencimiento_sin_dia(conn)
         if instancia["Vencimiento"]:
             from PySide6.QtCore import QDate
             self.campo_vencimiento.setDate(QDate.fromString(instancia["Vencimiento"], "yyyy-MM-dd"))
@@ -505,7 +547,7 @@ class _PanelCargaControl(QWidget):
         # Columna 2: Vencimiento, Importe y el botón principal "Crear
         # concepto".
         self._agregar(col2, _titulo_campo("Vencimiento (opcional)"))
-        self.campo_vencimiento = _campo_fecha_opcional(self.conn)
+        self.campo_vencimiento = _campo_vencimiento_sin_dia(self.conn)
         self.campo_vencimiento.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self._agregar(col2, self.campo_vencimiento)
 
@@ -523,17 +565,23 @@ class _PanelCargaControl(QWidget):
         self.boton_crear.clicked.connect(self._crear)
         self._agregar(col2, self.boton_crear)
 
-        # Pedido explícito de la clienta: cuatro etiquetas de conteo
-        # debajo de "Crear concepto" — los mismos buckets de color que
-        # ya usa `_color_fila`, sobre lo que está actualmente en
+        # Pedido explícito de la clienta: las siete etiquetas de conteo
+        # van todas debajo de "Crear concepto", en esta misma columna 2
+        # (antes las últimas tres vivían en la columna 3, debajo de
+        # "Eliminar registro duplicado") — los mismos buckets de color
+        # que ya usa `_color_fila`, sobre lo que está actualmente en
         # pantalla (post-filtro). Se actualizan en cada `actualizar()`.
         self.etiqueta_conteo_por_cargar = QLabel()
         self.etiqueta_conteo_vencimiento_hoy = QLabel()
         self.etiqueta_conteo_vencimiento_mañana = QLabel()
         self.etiqueta_conteo_vencimiento_en_dias = QLabel()
+        self.etiqueta_conteo_vencido = QLabel()
+        self.etiqueta_conteo_archivados = QLabel()
+        self.etiqueta_conteo_total = QLabel()
         for etiqueta in (
             self.etiqueta_conteo_por_cargar, self.etiqueta_conteo_vencimiento_hoy,
             self.etiqueta_conteo_vencimiento_mañana, self.etiqueta_conteo_vencimiento_en_dias,
+            self.etiqueta_conteo_vencido, self.etiqueta_conteo_archivados, self.etiqueta_conteo_total,
         ):
             self._agregar(col2, etiqueta)
         col2.addStretch(1)
@@ -574,16 +622,12 @@ class _PanelCargaControl(QWidget):
         self.boton_eliminar_duplicado.setFixedWidth(_ANCHO_CAMPO_CARGA_CONTROL)
         self.boton_eliminar_duplicado.clicked.connect(self._eliminar_registro_duplicado)
         self._agregar(col3, self.boton_eliminar_duplicado)
-
-        # Pedido explícito de la clienta: tres etiquetas de conteo más,
-        # debajo de "Eliminar registro duplicado" — mismo mecanismo que
-        # las cuatro de la columna 2.
-        self.etiqueta_conteo_vencido = QLabel()
-        self.etiqueta_conteo_archivados = QLabel()
-        self.etiqueta_conteo_total = QLabel()
-        for etiqueta in (self.etiqueta_conteo_vencido, self.etiqueta_conteo_archivados, self.etiqueta_conteo_total):
-            self._agregar(col3, etiqueta)
         col3.addStretch(1)
+
+        # Línea divisoria vertical entre la columna 3 y la columna 4 —
+        # pedido explícito de la clienta, para separar visualmente los
+        # botones de acción de los filtros.
+        layout_columnas.insertWidget(3, _linea_divisoria_vertical())
 
         # Columna 4: los filtros, en cascada MUTUA (sin jerarquía entre
         # sí, a diferencia de Localidad->Edificio->Unidad) — las
@@ -594,6 +638,13 @@ class _PanelCargaControl(QWidget):
         # depende de que el combo tenga datos de un profesional) — no
         # cambia de ancho al seleccionar ni al tipear, el combo ya
         # queda con `setFixedWidth` como el resto de los campos.
+        #
+        # Pedido explícito de la clienta: título "Filtros" (Nivel 2,
+        # `subtituloSeccion`) arriba de todo, encima de "Nombre".
+        self.titulo_filtros = QLabel("Filtros")
+        self.titulo_filtros.setObjectName("subtituloSeccion")
+        self._agregar(col4, self.titulo_filtros)
+
         self.combo_filtro_nombre = QComboBox()
         self.combo_filtro_categoria = QComboBox()
         self.combo_filtro_afectacion = QComboBox()
@@ -919,9 +970,8 @@ class _PanelCargaControl(QWidget):
                 fila_idx, self._COL_MEDIO_PAGO, QTableWidgetItem(instancia["MedioPago"] or ""),
             )
             self.tabla.setItem(fila_idx, self._COL_PERIODO, item_centrado(instancia["Periodo"]))
-            self.tabla.setItem(
-                fila_idx, self._COL_VENCIMIENTO, item_centrado(instancia["Vencimiento"] or ""),
-            )
+            texto_vencimiento = _fecha_dd_mm_yyyy(instancia["Vencimiento"]) if instancia["Vencimiento"] else ""
+            self.tabla.setItem(fila_idx, self._COL_VENCIMIENTO, item_centrado(texto_vencimiento))
             self.tabla.setItem(fila_idx, self._COL_IMPORTE, _item_importe(instancia["Importe"]))
             self.tabla.setItem(fila_idx, self._COL_ESTADO, item_centrado(instancia["Estado"]))
             self._armar_botones_fila(fila_idx, instancia)
@@ -943,13 +993,16 @@ class _PanelCargaControl(QWidget):
         # de arriba — necesitan su ancho real para no cortar el texto.
         for columna in (self._COL_EDITAR, self._COL_ABONAR, self._COL_ARCHIVAR, self._COL_DESHACER):
             self.tabla.resizeColumnToContents(columna)
-        # "Cuenta/Id" al ancho de "Categoría"; "Importe" un 20% más
-        # ancho que su ancho natural — pedido explícito de la clienta,
-        # las dos le sacan el espacio a Nombre/Afectación (`Stretch`,
-        # lo absorben solas, sin cálculo manual — ver `_armar_ui`).
-        self.tabla.setColumnWidth(self._COL_CUENTA_ID, self.tabla.columnWidth(self._COL_CATEGORIA))
+        # "Cuenta/Id" al ancho de "Categoría" menos un 25%; "Importe" un
+        # 20% más ancho que su ancho natural, menos un 20% — pedido
+        # explícito de la clienta (una ronda sobre la otra: antes era
+        # "Cuenta/Id" = "Categoría" e "Importe" = natural*1.2, ver
+        # CLAUDE.md). El ancho que se libera lo absorben solas Nombre/
+        # Afectación (`Stretch`, sin cálculo manual — ver `_armar_ui`).
+        self.tabla.setColumnWidth(self._COL_CUENTA_ID, round(self.tabla.columnWidth(self._COL_CATEGORIA) * 0.75))
         self.tabla.resizeColumnToContents(self._COL_IMPORTE)
-        self.tabla.setColumnWidth(self._COL_IMPORTE, round(self.tabla.columnWidth(self._COL_IMPORTE) * 1.2))
+        ancho_importe = round(self.tabla.columnWidth(self._COL_IMPORTE) * 1.2)
+        self.tabla.setColumnWidth(self._COL_IMPORTE, round(ancho_importe * 0.8))
         self._actualizar_botones_seleccion()
         self._actualizar_etiquetas_conteo(colores_fila, filas)
 
@@ -1169,9 +1222,24 @@ class _PanelHistorialControlPagos(QWidget):
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.tabla.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         header = self.tabla.horizontalHeader()
-        for columna in (1, 2, 3, 4):
+        # Pedido explícito de la clienta: "Nombre"/"Afectación" son las
+        # únicas dos columnas que absorben el ancho liberado al achicar
+        # "Período"/"Vencimiento"/"Importe" (ver `actualizar`) —
+        # "Categoría"/"Medio de pago" salen de `Stretch` y pasan a
+        # `ResizeToContents` (no compiten por ese ancho liberado).
+        for columna in (1, 3):
             header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Stretch)
+        for columna in (2, 4):
+            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.ResizeToContents)
+        # "Período"/"Vencimiento"/"Importe" quedan en ancho manual
+        # (`Interactive`, fijado a mano en cada `actualizar()`).
+        for columna in (0, 5, 6):
+            header.setSectionResizeMode(columna, QHeaderView.ResizeMode.Interactive)
         self.tabla.itemSelectionChanged.connect(self._actualizar_boton_editar_registro)
+        # Pedido explícito de la clienta: tabla ordenable por click en el
+        # encabezado — mismo mecanismo que "Carga y control"/"Registrar
+        # pagos" (`OrdenTabla`).
+        self._orden = OrdenTabla(self.tabla, self.actualizar)
         layout_externo.addWidget(self.tabla, stretch=1)
         self._filas: list[tuple] = []
 
@@ -1223,6 +1291,8 @@ class _PanelHistorialControlPagos(QWidget):
                 continue
             filas.append((i, concepto, afectacion))
         filas.sort(key=lambda t: (t[0]["Periodo"], t[1]["Nombre"]), reverse=True)
+        if self._orden.columna is not None:
+            filas.sort(key=self._clave_orden_columna(self._orden.columna), reverse=not self._orden.ascendente)
         self._filas = filas
 
         self.tabla.setRowCount(len(filas))
@@ -1232,10 +1302,45 @@ class _PanelHistorialControlPagos(QWidget):
             self.tabla.setItem(fila_idx, 2, QTableWidgetItem(concepto["Categoria"] or ""))
             self.tabla.setItem(fila_idx, 3, QTableWidgetItem(afectacion))
             self.tabla.setItem(fila_idx, 4, QTableWidgetItem(instancia["MedioPago"] or ""))
-            self.tabla.setItem(fila_idx, 5, item_centrado(instancia["Vencimiento"] or ""))
+            texto_vencimiento = _fecha_dd_mm_yyyy(instancia["Vencimiento"]) if instancia["Vencimiento"] else ""
+            self.tabla.setItem(fila_idx, 5, item_centrado(texto_vencimiento))
             self.tabla.setItem(fila_idx, 6, _item_importe(instancia["Importe"]))
             self.tabla.setItem(fila_idx, 7, item_centrado(instancia["Estado"]))
+        # Pedido explícito de la clienta: "Período"/"Vencimiento" al
+        # ancho mínimo que entra el título sin cortar (mismo criterio
+        # que `imagenes._ajustar_columnas`: `QFontMetrics` sobre la
+        # fuente real del encabezado + un colchón chico para el padding
+        # interno que Qt le suma a la celda); "Importe" ancho para que
+        # entre "$ 0.000.000,00" (mismo criterio que `pagos._TEXTO_
+        # MONTO_MAXIMO`). El ancho que esto libera lo absorben solas
+        # "Nombre"/"Afectación" (`Stretch`, ver `_armar_ui`).
+        metrica_encabezado = QFontMetrics(self.tabla.horizontalHeader().font())
+        for columna in (0, 5):
+            titulo = self.tabla.horizontalHeaderItem(columna).text()
+            ancho = metrica_encabezado.horizontalAdvance(titulo) + _COLCHON_TITULO_COLUMNA
+            self.tabla.setColumnWidth(columna, ancho)
+        ancho_importe = QFontMetrics(self.tabla.font()).horizontalAdvance(_TEXTO_IMPORTE_MAXIMO)
+        self.tabla.setColumnWidth(6, ancho_importe + _PADDING_COLUMNA_IMPORTE)
         self._actualizar_boton_editar_registro()
+
+    @staticmethod
+    def _clave_orden_columna(columna: int):
+        """Clave de orden para un click de encabezado — mismo criterio
+        que `_PanelCargaControl._clave_orden_columna`/`_PanelPagos.
+        _clave_orden`: un dict de lambdas, una por columna, sobre la
+        misma tupla (instancia, concepto, afectación) que ya arma
+        `actualizar`."""
+        claves = {
+            0: lambda f: f[0]["Periodo"],
+            1: lambda f: f[1]["Nombre"],
+            2: lambda f: f[1]["Categoria"] or "",
+            3: lambda f: f[2],
+            4: lambda f: f[0]["MedioPago"] or "",
+            5: lambda f: f[0]["Vencimiento"] or "",
+            6: lambda f: f[0]["Importe"] or 0,
+            7: lambda f: f[0]["Estado"],
+        }
+        return claves[columna]
 
     def _fila_seleccionada_instancia(self) -> sqlite3.Row | None:
         filas_sel = self.tabla.selectionModel().selectedRows()
@@ -1250,6 +1355,24 @@ class _PanelHistorialControlPagos(QWidget):
         instancia = self._fila_seleccionada_instancia()
         if instancia is None:
             return
+        # Pedido explícito de la clienta: "Editar registro" de
+        # "Historial" es solo para reabrir un registro VIEJO (de un
+        # período anterior al actual) que el cierre de mes archivó de
+        # más — uno del período actual o de un período posterior
+        # (próximo, duplicado por adelantado) se sigue editando desde
+        # "Carga y control" (ahí está la lógica de tarjeta, vencimiento+
+        # importe juntos, duplicar/eliminar duplicado, etc. que este
+        # diálogo no replica).
+        if instancia["Periodo"] >= periodo_actual(self.conn):
+            QMessageBox.warning(
+                self, "Editar registro",
+                "Este registro es del período actual o de uno posterior — esos se editan desde la "
+                "solapa \"Carga y control\", no desde \"Historial\". Ahí es donde vive el resto de la "
+                "lógica de ese período (medio de pago tarjeta, vencimiento e importe juntos, "
+                "duplicar/eliminar duplicado para el período próximo), que \"Editar registro\" de "
+                "\"Historial\" no replica.",
+            )
+            return
         dialogo = _DialogoEditarInstancia(self.conn, instancia, parent=self, incluir_estado=True)
         if dialogo.exec() == QDialog.DialogCode.Accepted:
             actualizar_instancia(
@@ -1258,6 +1381,18 @@ class _PanelHistorialControlPagos(QWidget):
             )
             self.actualizar()
             QMessageBox.information(self, "Editar registro", "Registro actualizado con éxito.")
+
+    def reiniciar(self) -> None:
+        """F5: vuelve todo a su estado inicial (filtros, orden y
+        selección) — mismo criterio que `_PanelCargaControl.reiniciar`
+        (CLAUDE.md, "F5... reinicia desde cero, distinto de showEvent")."""
+        self.tabla.clearSelection()
+        self._orden.reiniciar()
+        for combo in (self.combo_categoria, self.combo_concepto, self.combo_afectacion, self.combo_medio_pago):
+            combo.blockSignals(True)
+            combo.setCurrentIndex(0)
+            combo.blockSignals(False)
+        self.actualizar()
 
 
 class PantallaControlPagos(QWidget):

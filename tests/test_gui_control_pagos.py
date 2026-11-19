@@ -330,6 +330,152 @@ def test_historial_boton_editar_registro_habilita_con_seleccion_y_edita_estado(q
     assert panel_historial.tabla.item(0, 7).text() == "Archivado"
 
 
+def test_historial_editar_registro_bloqueado_para_periodo_actual_con_alerta(qtbot, conn, unidad, monkeypatch):
+    """Pedido explícito de la clienta: "Editar registro" de "Historial"
+    solo permite editar un registro VIEJO (de un período anterior al
+    actual) — uno del período actual/posterior tiene que editarse desde
+    "Carga y control", y al apretar el botón sobre uno de esos tiene que
+    salir una alerta explicando eso en vez de abrir el diálogo."""
+    from PySide6.QtWidgets import QMessageBox
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    _crear_concepto_unidad(pantalla.panel_carga_control, unidad)
+    panel_historial = pantalla.panel_historial
+    panel_historial.actualizar()
+    panel_historial.tabla.selectRow(0)
+    instancia_antes = panel_historial._fila_seleccionada_instancia()
+
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: avisos.append(a)))
+    panel_historial._editar_registro()
+
+    assert len(avisos) == 1
+    assert "Carga y control" in avisos[0][2]
+    # Nada cambió: el registro sigue igual (no se abrió el diálogo).
+    instancia_despues = obtener_repositorio(conn, "InstanciaControlPago").obtener(instancia_antes["IdInstancia"])
+    assert instancia_despues["Estado"] == instancia_antes["Estado"]
+
+
+def test_historial_editar_registro_permite_un_periodo_viejo(qtbot, conn, unidad, monkeypatch):
+    """Un registro de un período ANTERIOR al actual sí se puede editar
+    desde "Historial" — comportamiento sin cambios para ese caso."""
+    from app.negocio.dias import sumar_meses
+    from PySide6.QtWidgets import QDialog, QMessageBox
+
+    import app.gui.pantallas.control_pagos as control_pagos_modulo
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    _crear_concepto_unidad(pantalla.panel_carga_control, unidad)
+    instancia = _instancia_actual(conn, pantalla.panel_carga_control)
+    repo = obtener_repositorio(conn, "InstanciaControlPago")
+    repo.actualizar(instancia["IdInstancia"], Periodo=sumar_meses(periodo_actual(conn), -1))
+
+    panel_historial = pantalla.panel_historial
+    panel_historial.actualizar()
+    panel_historial.tabla.selectRow(0)
+    assert panel_historial._fila_seleccionada_instancia()["Periodo"] < periodo_actual(conn)
+
+    avisos = []
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: avisos.append(a)))
+
+    class _DialogoFalso:
+        def exec(self):
+            return QDialog.DialogCode.Accepted
+
+        def vencimiento(self):
+            return None
+
+        def importe(self):
+            return None
+
+        def estado(self):
+            return "Abonado"
+
+        def cuenta_id(self):
+            return None
+
+    monkeypatch.setattr(control_pagos_modulo, "_DialogoEditarInstancia", lambda *a, **k: _DialogoFalso())
+    panel_historial._editar_registro()
+
+    assert not avisos  # no se bloqueó: es un registro viejo
+    assert repo.obtener(instancia["IdInstancia"])["Estado"] == "Abonado"
+
+
+def test_historial_columnas_periodo_y_vencimiento_al_minimo_e_importe_para_formato_maximo(qtbot, conn):
+    from PySide6.QtGui import QFontMetrics
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel_historial = pantalla.panel_historial
+    panel_historial.actualizar()
+
+    metrica_encabezado = QFontMetrics(panel_historial.tabla.horizontalHeader().font())
+    for columna in (0, 5):
+        titulo = panel_historial.tabla.horizontalHeaderItem(columna).text()
+        ancho_esperado = metrica_encabezado.horizontalAdvance(titulo) + 12
+        assert panel_historial.tabla.columnWidth(columna) == ancho_esperado
+
+    ancho_importe_esperado = QFontMetrics(panel_historial.tabla.font()).horizontalAdvance("$ 0.000.000,00") + 10
+    assert panel_historial.tabla.columnWidth(6) == ancho_importe_esperado
+
+
+def test_historial_vencimiento_formato_dd_mm_yyyy_en_tabla(qtbot, conn, unidad):
+    from app.negocio.control_pagos import actualizar_instancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel_carga = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel_carga, unidad)
+    instancia = _instancia_actual(conn, panel_carga)
+    actualizar_instancia(conn, instancia["IdInstancia"], vencimiento="2026-08-15", importe=1000)
+
+    panel_historial = pantalla.panel_historial
+    panel_historial.actualizar()
+    assert panel_historial.tabla.item(0, 5).text() == "15-08-2026"
+
+
+def test_historial_tabla_ordenable_por_click_en_encabezado(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel_carga = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel_carga, unidad, nombre="Zeta")
+    _crear_concepto_unidad(panel_carga, unidad, nombre="Alfa")
+
+    panel_historial = pantalla.panel_historial
+    panel_historial.actualizar()
+    panel_historial.tabla.horizontalHeader().sectionClicked.emit(1)  # Nombre, ascendente
+
+    assert panel_historial.tabla.item(0, 1).text() == "Alfa"
+    assert panel_historial.tabla.item(1, 1).text() == "Zeta"
+
+    panel_historial.tabla.horizontalHeader().sectionClicked.emit(1)  # mismo click, invierte
+
+    assert panel_historial.tabla.item(0, 1).text() == "Zeta"
+    assert panel_historial.tabla.item(1, 1).text() == "Alfa"
+
+
+def test_historial_f5_reinicia_filtros_orden_y_seleccion(qtbot, conn, unidad):
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel_carga = pantalla.panel_carga_control
+    _crear_concepto_unidad(panel_carga, unidad, nombre="Edenor")
+
+    panel_historial = pantalla.panel_historial
+    panel_historial.actualizar()
+    indice = panel_historial.combo_concepto.findData("Edenor")
+    panel_historial.combo_concepto.setCurrentIndex(indice)
+    panel_historial.tabla.horizontalHeader().sectionClicked.emit(1)
+    panel_historial.tabla.selectRow(0)
+
+    panel_historial.reiniciar()
+
+    assert panel_historial.combo_concepto.currentIndex() == 0
+    assert panel_historial._orden.columna is None
+    assert not panel_historial.tabla.selectionModel().selectedRows()
+
+
 def test_las_cuatro_columnas_arrancan_a_la_misma_altura_y_con_igual_ancho(qtbot, conn):
     """Pedido explícito de la clienta: "cuatro columnas de igual ancho
     que abarquen todo el ancho de la pantalla, el primer elemento de
@@ -600,7 +746,12 @@ def test_dialogo_editar_instancia_manual_acepta_los_dos_en_blanco(qtbot, conn, u
     assert dialogo.result() == QDialog.DialogCode.Accepted
 
 
-def test_tabla_carga_control_cuenta_id_despues_de_afectacion_y_ancho_igual_a_categoria(qtbot, conn, unidad):
+def test_tabla_carga_control_cuenta_id_despues_de_afectacion_y_ancho_25_por_ciento_menos_que_categoria(
+    qtbot, conn, unidad,
+):
+    """Pedido explícito de la clienta (ronda siguiente a la que fijó
+    "Cuenta/Id" al ancho de "Categoría"): ese ancho se reduce un 25%
+    más."""
     pantalla = PantallaControlPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_carga_control
@@ -608,10 +759,14 @@ def test_tabla_carga_control_cuenta_id_despues_de_afectacion_y_ancho_igual_a_cat
     _crear_concepto_unidad(panel, unidad)
 
     assert panel.tabla.item(0, panel._COL_CUENTA_ID).text() == "12345-6"
-    assert panel.tabla.columnWidth(panel._COL_CUENTA_ID) == panel.tabla.columnWidth(panel._COL_CATEGORIA)
+    ancho_esperado = round(panel.tabla.columnWidth(panel._COL_CATEGORIA) * 0.75)
+    assert abs(panel.tabla.columnWidth(panel._COL_CUENTA_ID) - ancho_esperado) <= 1
 
 
-def test_tabla_carga_control_importe_un_20_por_ciento_mas_ancho(qtbot, conn, unidad):
+def test_tabla_carga_control_importe_un_20_por_ciento_mas_ancho_menos_un_20_por_ciento(qtbot, conn, unidad):
+    """Pedido explícito de la clienta (ronda siguiente a la que fijó
+    "Importe" un 20% más ancho que su ancho natural): ese ancho se
+    reduce un 20% más."""
     pantalla = PantallaControlPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_carga_control
@@ -620,7 +775,8 @@ def test_tabla_carga_control_importe_un_20_por_ciento_mas_ancho(qtbot, conn, uni
 
     panel.tabla.resizeColumnToContents(panel._COL_IMPORTE)
 
-    assert abs(ancho_achicado - round(panel.tabla.columnWidth(panel._COL_IMPORTE) * 1.2)) <= 1
+    ancho_esperado = round(round(panel.tabla.columnWidth(panel._COL_IMPORTE) * 1.2) * 0.8)
+    assert abs(ancho_achicado - ancho_esperado) <= 1
 
 
 def test_boton_deshacer_deshabilitado_sin_datos_habilitado_con_datos(qtbot, conn, unidad):
@@ -728,6 +884,94 @@ def test_etiquetas_de_conteo_reflejan_lo_que_esta_en_pantalla(qtbot, conn, unida
     assert panel.etiqueta_conteo_por_cargar.text() == "Conceptos por cargar: 1"
     assert panel.etiqueta_conteo_vencimiento_hoy.text() == "Con vencimiento hoy: 1"
     assert panel.etiqueta_conteo_total.text() == "Total conceptos: 2"
+
+
+def test_las_siete_etiquetas_de_conteo_viven_todas_en_la_columna_2(qtbot, conn):
+    """Pedido explícito de la clienta: las tres etiquetas que vivían
+    debajo de "Eliminar registro duplicado" (columna 3) pasan a vivir
+    debajo de las otras cuatro, en la misma columna 2 (debajo de "Crear
+    concepto")."""
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+
+    columna2 = panel.boton_crear.parentWidget()
+    columna3 = panel.boton_eliminar_duplicado.parentWidget()
+    assert columna2 is not columna3
+    for etiqueta in (
+        panel.etiqueta_conteo_por_cargar, panel.etiqueta_conteo_vencimiento_hoy,
+        panel.etiqueta_conteo_vencimiento_mañana, panel.etiqueta_conteo_vencimiento_en_dias,
+        panel.etiqueta_conteo_vencido, panel.etiqueta_conteo_archivados, panel.etiqueta_conteo_total,
+    ):
+        assert etiqueta.parentWidget() is columna2
+
+    layout_columna2 = columna2.layout()
+    indices = [
+        layout_columna2.indexOf(w) for w in (
+            panel.boton_crear, panel.etiqueta_conteo_por_cargar, panel.etiqueta_conteo_vencimiento_hoy,
+            panel.etiqueta_conteo_vencimiento_mañana, panel.etiqueta_conteo_vencimiento_en_dias,
+            panel.etiqueta_conteo_vencido, panel.etiqueta_conteo_archivados, panel.etiqueta_conteo_total,
+        )
+    ]
+    assert indices == sorted(indices)
+
+
+def test_columna_4_tiene_titulo_filtros_y_linea_divisoria_con_columna_3(qtbot, conn):
+    from PySide6.QtWidgets import QFrame
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+
+    assert panel.titulo_filtros.text() == "Filtros"
+    assert panel.titulo_filtros.objectName() == "subtituloSeccion"
+    columna4 = panel.combo_filtro_nombre.parentWidget()
+    assert panel.titulo_filtros.parentWidget() is columna4
+    layout_columna4 = columna4.layout()
+    assert layout_columna4.indexOf(panel.titulo_filtros) < layout_columna4.indexOf(panel.combo_filtro_nombre)
+
+    columna3 = panel.boton_eliminar_duplicado.parentWidget()
+    fila_columnas = columna3.parentWidget()
+    layout_fila = fila_columnas.layout()
+    indice_col3 = layout_fila.indexOf(columna3)
+    indice_col4 = layout_fila.indexOf(columna4)
+    assert indice_col4 == indice_col3 + 2
+    divisor = layout_fila.itemAt(indice_col3 + 1).widget()
+    assert isinstance(divisor, QFrame)
+    assert divisor.frameShape() == QFrame.Shape.VLine
+
+
+def test_vencimiento_formato_dd_mm_yyyy_en_campo_y_en_tabla(qtbot, conn, unidad):
+    from app.negocio.control_pagos import actualizar_instancia
+
+    pantalla = PantallaControlPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_carga_control
+    assert panel.campo_vencimiento.displayFormat() == "dd-MM-yyyy"
+
+    _crear_concepto_unidad(panel, unidad, nombre="Edenor")
+    instancia = _instancia_actual(conn, panel, nombre="Edenor")
+    actualizar_instancia(conn, instancia["IdInstancia"], vencimiento="2026-08-15", importe=1000)
+    panel.actualizar()
+
+    assert panel.tabla.item(0, panel._COL_VENCIMIENTO).text() == "15-08-2026"
+
+
+def test_dialogo_editar_instancia_campo_vencimiento_formato_dd_mm_yyyy(qtbot, conn):
+    from app.gui.pantallas.control_pagos import _DialogoEditarInstancia
+
+    conn.execute(
+        "INSERT INTO ConceptoControlPago (Nombre, TipoAfectacion, Activo) VALUES ('X', 'Espacio general', 1)"
+    )
+    conn.commit()
+    concepto = obtener_repositorio(conn, "ConceptoControlPago").listar()[0]
+    id_instancia = obtener_repositorio(conn, "InstanciaControlPago").crear(
+        IdConcepto=concepto["IdConcepto"], Periodo=periodo_actual(conn), Estado="Pendiente",
+        MedioPago="CA Bco X",
+    )
+    instancia = obtener_repositorio(conn, "InstanciaControlPago").obtener(id_instancia)
+    dialogo = _DialogoEditarInstancia(conn, instancia)
+    assert dialogo.campo_vencimiento.displayFormat() == "dd-MM-yyyy"
 
 
 def test_dialogo_editar_instancia_foco_despues_de_importe_va_al_boton_ok(qtbot, conn, unidad):
