@@ -250,6 +250,27 @@ def test_estadisticas_principales_total_liquidado_no_duplica_reemisiones(conn):
     assert principales.total_liquidado == pytest.approx(170000.0)  # última de prof1 (120000) + prof2 (50000)
 
 
+def test_estadisticas_principales_saldo_pendiente_no_resta_el_sobrepago_de_un_profesional(conn):
+    """Bug real encontrado y arreglado (pedido explícito de la clienta,
+    ejemplo dado): total liquidado $10.000 — un profesional debía $500
+    y pagó $600 (deja $100 a favor del próximo mes), el otro debía
+    $9.500 y no pagó nada. El saldo pendiente tiene que ser $9500, no
+    $9400: el sobrepago de uno no puede reducir el saldo pendiente del
+    otro, tiene que quedar acotado profesional por profesional."""
+    _fijar_fecha(conn, "2026-08-15")
+    id_prof_sobrepaga = _profesional(conn, Apellido="Sobrepaga")
+    id_prof_debe = _profesional(conn, Apellido="Debe")
+    repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
+    repo_liq.crear(IdProfesional=id_prof_sobrepaga, Periodo="2026-08", MontoGenerado=500)
+    repo_liq.crear(IdProfesional=id_prof_debe, Periodo="2026-08", MontoGenerado=9500)
+    obtener_repositorio(conn, "HistorialPagos").crear(
+        IdProfesional=id_prof_sobrepaga, Monto=600, PeriodoImputado="2026-08",
+    )
+    principales = calcular_estadisticas_principales(conn)
+    assert principales.total_liquidado == pytest.approx(10000.0)
+    assert principales.saldo_pendiente == pytest.approx(9500.0)
+
+
 def test_estadisticas_principales_total_ingresos_y_balance_reusan_balance_del_negocio(conn):
     """"Total ingresos"/"Gastos operativos"/"Balance de negocio" son los
     mismos tres valores que ya calcula `app.negocio.balance.resultado_

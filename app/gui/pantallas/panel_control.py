@@ -695,10 +695,10 @@ class _PanelAvancePeriodo(QWidget):
             f"Monto por reservas regulares: {formatear_moneda(principales.monto_regulares)}\n"
             f"Monto por reservas aisladas: {formatear_moneda(principales.monto_aisladas)}\n"
             f"Total ingresos: {formatear_moneda(principales.total_ingresos)}\n"
-            f"Total liquidado: {formatear_moneda(principales.total_liquidado)}\n"
-            f"Saldo pendiente de cobro (de lo liquidado): {formatear_moneda(principales.saldo_pendiente)}\n"
             f"Gastos operativos: {formatear_moneda(principales.gastos_operativos)}\n"
-            f"Balance de negocio: {formatear_moneda(principales.balance_negocio)}"
+            f"Balance de negocio: {formatear_moneda(principales.balance_negocio)}\n"
+            f"Total liquidado: {formatear_moneda(principales.total_liquidado)}\n"
+            f"Saldo pendiente de cobro (de lo liquidado): {formatear_moneda(principales.saldo_pendiente)}"
         )
 
         ocup = calcular_estadisticas_ocupacion(self.conn)

@@ -181,14 +181,38 @@ def _total_liquidado_periodo(conn: sqlite3.Connection, periodo: str) -> float:
 
 def _saldo_pendiente_periodo(conn: sqlite3.Connection, periodo: str) -> float:
     """"Cuánto queda por cobrar de este mes": lo facturado en el período
-    (`LiquidacionEmitida.MontoGenerado`) menos lo ya cobrado imputado a
-    ese mismo período (`HistorialPagos.Monto`) — confirmado con la
-    clienta en la revisión "uno por uno" de Panel de control, es el
-    cálculo que tenía en mente."""
-    cobrado = conn.execute(
-        "SELECT COALESCE(SUM(Monto), 0) AS total FROM HistorialPagos WHERE PeriodoImputado = ?", (periodo,),
-    ).fetchone()["total"]
-    return _total_liquidado_periodo(conn, periodo) - cobrado
+    (`LiquidacionEmitida.MontoGenerado` de la ÚLTIMA emisión de cada
+    profesional, mismo criterio que `_total_liquidado_periodo`) menos lo
+    ya cobrado imputado a ese mismo período (`HistorialPagos.Monto`) —
+    PERO si un profesional pagó de más (ej. debía $500 y pagó $600), el
+    excedente ($100) queda a favor del próximo mes y NO se cuenta acá.
+
+    Bug real encontrado y arreglado (pedido explícito de la clienta,
+    ejemplo dado: total liquidado $10.000, un profesional debía $500,
+    pagó $600 y deja $100 a favor del próximo mes — el saldo pendiente
+    tiene que ser $9500, no $9400): antes se restaba lo cobrado de TODOS
+    los profesionales de una sola vez contra el total liquidado global,
+    sin tope por profesional, así que el sobrepago de uno terminaba
+    reduciendo el saldo pendiente de los demás. Ahora se calcula
+    profesional por profesional — nunca se resta de un profesional más
+    de lo que su propia liquidación generó — y se suman los pendientes
+    individuales (el que ya pagó de más aporta $0, nunca un valor
+    negativo)."""
+    filas = conn.execute(
+        """
+        SELECT le.MontoGenerado AS Liquidado, COALESCE(pagos.Total, 0) AS Pagado
+        FROM LiquidacionEmitida le
+        LEFT JOIN (
+            SELECT IdProfesional, SUM(Monto) AS Total FROM HistorialPagos
+            WHERE PeriodoImputado = ? GROUP BY IdProfesional
+        ) pagos ON pagos.IdProfesional = le.IdProfesional
+        WHERE le.Periodo = ? AND le.IdLiquidacion IN (
+            SELECT MAX(IdLiquidacion) FROM LiquidacionEmitida WHERE Periodo = ? GROUP BY IdProfesional
+        )
+        """,
+        (periodo, periodo, periodo),
+    ).fetchall()
+    return sum(max(f["Liquidado"] - f["Pagado"], 0) for f in filas)
 
 
 def calcular_estadisticas_ocupacion(conn: sqlite3.Connection) -> EstadisticasOcupacion:

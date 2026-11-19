@@ -552,6 +552,22 @@ def test_tarjeta_estadisticas_principales_muestra_los_siete_conceptos(qtbot, con
         assert etiqueta in texto
 
 
+def test_tarjeta_estadisticas_principales_reordena_gastos_y_balance_antes_de_liquidado(qtbot, conn):
+    """Pedido explícito de la clienta: "Gastos operativos"/"Balance de
+    negocio" pasan a estar inmediatamente después de "Total ingresos";
+    "Total liquidado"/"Saldo pendiente de cobro (de lo liquidado)"
+    quedan al final."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.panel_avance.etiqueta_estadisticas_principales.text()
+    orden_esperado = [
+        "Total ingresos:", "Gastos operativos:", "Balance de negocio:",
+        "Total liquidado:", "Saldo pendiente de cobro (de lo liquidado):",
+    ]
+    posiciones = [texto.index(etiqueta) for etiqueta in orden_esperado]
+    assert posiciones == sorted(posiciones)
+
+
 def test_tarjeta_profesionales_muestra_los_cuatro_conceptos_nuevos(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
