@@ -116,7 +116,19 @@ del valor anterior (pedido explícito, "lo que se libera dáselo al
 cuadro de alertas") — no hace falta ningún cambio aparte para que
 Alertas absorba ese espacio: ya tenía `stretch=1` en `layout_solapa`,
 a diferencia de la grilla (sin stretch propio), así que cualquier
-espacio vertical sobrante en la solapa ya iba entero a Alertas."""
+espacio vertical sobrante en la solapa ya iba entero a Alertas.
+
+Rediseño completo (ronda siguiente): la grilla pareja de 3x3 se
+reemplaza por dos columnas de tres cuadritos chicos (columna 1: Período
+actual y último backup / Profesionales / Control de pagos; columna 2:
+Ocupación y horas mes en curso / Feriados y fechas especiales próximas
+/ Cumpleaños y días de profesión) y una tercer columna de un solo
+cuadro LARGO, del mismo ancho que las otras dos pero con el alto de las
+tres juntas — "Estadísticas principales mes en curso" rediseñada por
+completo con ese espacio (ver `_armar_tarjeta_estadisticas_principales`
+y `app.negocio.panel_control.EstadisticasPrincipales`). Se eliminan los
+dos cuadritos "(Sin asignar)" (`_armar_tarjeta_vacia`, de baja) — ya no
+quedan cuadritos libres en este diseño."""
 from __future__ import annotations
 
 import sqlite3
@@ -170,7 +182,6 @@ from app.negocio.panel_control import (
 )
 
 _ANCHO_BOTON = 220
-_COLUMNAS_GRILLA = 3
 # SistemaDF v0.11.2026.10 ("Avance de período, backup, y vista rápida"):
 # un tercio menos que el alto original (140px) — pedido explícito de la
 # clienta, el espacio que se libera lo absorbe solo el cuadro de Alertas
@@ -203,6 +214,17 @@ def _linea_divisoria() -> QFrame:
     linea.setFrameShape(QFrame.Shape.HLine)
     linea.setFrameShadow(QFrame.Shadow.Sunken)
     return linea
+
+
+def _subtitulo_italica(texto: str) -> QLabel:
+    """Subtítulo de sección DENTRO de "Estadísticas principales mes en
+    curso" (Nivel 2 suelto, mismo criterio que `subtituloSeccion` pero
+    sin negrita — acá la clienta pidió puntualmente solo itálica, para
+    separar las tres cuentas del cuadro sin competir visualmente con el
+    título del cuadrito, que ya es itálica+negrita)."""
+    etiqueta = QLabel(texto)
+    etiqueta.setStyleSheet("font-style: italic;")
+    return etiqueta
 
 
 def _texto_explicacion(texto: str) -> QLabel:
@@ -478,32 +500,26 @@ class _PanelAvancePeriodo(QWidget):
         # así terminan siempre del mismo alto (verificado armando la
         # pantalla real y midiendo alto en píxeles, no solo leyendo el
         # código — ver docs/historial para el detalle de la ronda).
-        # Pedido explícito de la clienta: se saca la sección de Alertas
-        # (ver docs/historial para el detalle de las rondas anteriores,
-        # que vivía en una tarjeta aparte de ancho completo) y en su
-        # lugar se suman tres cuadritos más, iguales a los seis de
-        # arriba — la grilla pasa de 2 filas de 3 a 3 filas de 3 (9 en
-        # total). El de la izquierda de esta tercera fila es "Control
-        # de pagos" (réplica de las etiquetas de conteo de "Carga y
-        # control", ver `_armar_tarjeta_control_pagos`); los otros dos
-        # quedan sin asignar por el momento (pedido explícito: vacíos
-        # hasta que la clienta decida qué contenido llevan).
-        tarjetas = [
-            self._armar_tarjeta_periodo_y_backup(),
-            self._armar_tarjeta_estadisticas_principales(),
-            self._armar_tarjeta_ocupacion(),
-            self._armar_tarjeta_profesionales(),
-            self._armar_tarjeta_fechas_especiales(),
-            self._armar_tarjeta_cumpleanos(),
-            self._armar_tarjeta_control_pagos(),
-            self._armar_tarjeta_vacia("vacia_1"),
-            self._armar_tarjeta_vacia("vacia_2"),
-        ]
-        for inicio in range(0, len(tarjetas), _COLUMNAS_GRILLA):
-            fila = QHBoxLayout()
-            for tarjeta in tarjetas[inicio:inicio + _COLUMNAS_GRILLA]:
-                fila.addWidget(tarjeta, stretch=1)
-            layout_solapa.addLayout(fila, stretch=1)
+        # Rediseño (ver docstring del módulo): dos columnas de tres
+        # cuadritos chicos cada una, más una tercer columna de un solo
+        # cuadro LARGO — las tres columnas con el mismo stretch, así
+        # quedan del mismo ancho, y la columna larga queda del alto de
+        # las otras dos (3 cuadritos chicos + el espaciado entre ellos).
+        columna_1 = QVBoxLayout()
+        columna_1.addWidget(self._armar_tarjeta_periodo_y_backup(), stretch=1)
+        columna_1.addWidget(self._armar_tarjeta_profesionales(), stretch=1)
+        columna_1.addWidget(self._armar_tarjeta_control_pagos(), stretch=1)
+
+        columna_2 = QVBoxLayout()
+        columna_2.addWidget(self._armar_tarjeta_ocupacion(), stretch=1)
+        columna_2.addWidget(self._armar_tarjeta_fechas_especiales(), stretch=1)
+        columna_2.addWidget(self._armar_tarjeta_cumpleanos(), stretch=1)
+
+        fila_columnas = QHBoxLayout()
+        fila_columnas.addLayout(columna_1, stretch=1)
+        fila_columnas.addLayout(columna_2, stretch=1)
+        fila_columnas.addWidget(self._armar_tarjeta_estadisticas_principales(), stretch=1)
+        layout_solapa.addLayout(fila_columnas, stretch=1)
 
         self._foco = instalar_enter_avanza_foco(
             [self.boton_backup, self.boton_restaurar, self.boton_avanzar], parent=self,
@@ -556,15 +572,64 @@ class _PanelAvancePeriodo(QWidget):
         return tarjeta
 
     def _armar_tarjeta_estadisticas_principales(self) -> QFrame:
-        """Cuadrito nuevo (punto 81, SistemaDF v0.11.2026.10), en el lugar
-        que liberó "Último backup" al fundirse con "Período actual" —
-        montos del mes en curso, todo el espacio, mismo criterio "neto"
-        que ya usan Estadísticas/Balance del negocio (ver `app.negocio.
-        panel_control.calcular_estadisticas_principales`)."""
+        """Rediseño completo (ronda siguiente a la del punto 81), pedido
+        explícito de la clienta — ya no es un solo bloque de texto, son
+        tres cuentas en cascada, cada una con su subtítulo en itálica,
+        las líneas que la componen, una línea divisoria y el total en
+        negrita (ver `app.negocio.panel_control.EstadisticasPrincipales`
+        para las fórmulas, derivadas exactamente de `Liquidacion.monto_
+        generado` para que "Total liquidado mes en curso" cierre siempre
+        con la suma real de las liquidaciones emitidas del período):
+
+        - "Liquidaciones mes en curso": los ocho conceptos que componen
+          una liquidación (más "Otros ajustes", la bolsa de conceptos
+          raros sin línea propia) → "Total liquidado mes en curso".
+        - "Resultado del negocio": lo liquidado más lo que generan los
+          profesionales A por fuera de cualquier liquidación (aisladas,
+          extraordinarias, llaves/cargos), menos los gastos operativos
+          del período → "Balance del negocio".
+        - "Monto a cobrar en el mes en curso": lo mismo de arriba menos
+          lo efectivamente cobrado hasta el momento (acotado por
+          profesional, sin contar excedentes) → "Monto restante del mes
+          a cobrar"."""
         tarjeta, layout = _tarjeta("Estadísticas principales mes en curso")
-        self.etiqueta_estadisticas_principales = QLabel()
-        self.etiqueta_estadisticas_principales.setWordWrap(True)
-        _agregar_contenido_escrolable(layout, self.etiqueta_estadisticas_principales)
+        contenido = QWidget()
+        layout_contenido = QVBoxLayout(contenido)
+        layout_contenido.setContentsMargins(0, 0, 0, 0)
+
+        layout_contenido.addWidget(_subtitulo_italica("Liquidaciones mes en curso"))
+        self.etiqueta_detalle_liquidaciones = QLabel()
+        self.etiqueta_detalle_liquidaciones.setWordWrap(True)
+        layout_contenido.addWidget(self.etiqueta_detalle_liquidaciones)
+        layout_contenido.addWidget(_linea_divisoria())
+        self.etiqueta_total_liquidado = QLabel()
+        self.etiqueta_total_liquidado.setStyleSheet("font-weight: bold;")
+        layout_contenido.addWidget(self.etiqueta_total_liquidado)
+
+        layout_contenido.addSpacing(12)
+
+        layout_contenido.addWidget(_subtitulo_italica("Resultado del negocio"))
+        self.etiqueta_detalle_resultado = QLabel()
+        self.etiqueta_detalle_resultado.setWordWrap(True)
+        layout_contenido.addWidget(self.etiqueta_detalle_resultado)
+        layout_contenido.addWidget(_linea_divisoria())
+        self.etiqueta_balance_negocio = QLabel()
+        self.etiqueta_balance_negocio.setStyleSheet("font-weight: bold;")
+        layout_contenido.addWidget(self.etiqueta_balance_negocio)
+
+        layout_contenido.addSpacing(12)
+
+        layout_contenido.addWidget(_subtitulo_italica("Monto a cobrar en el mes en curso"))
+        self.etiqueta_detalle_cobro = QLabel()
+        self.etiqueta_detalle_cobro.setWordWrap(True)
+        layout_contenido.addWidget(self.etiqueta_detalle_cobro)
+        layout_contenido.addWidget(_linea_divisoria())
+        self.etiqueta_monto_restante_a_cobrar = QLabel()
+        self.etiqueta_monto_restante_a_cobrar.setStyleSheet("font-weight: bold;")
+        layout_contenido.addWidget(self.etiqueta_monto_restante_a_cobrar)
+
+        layout_contenido.addStretch()
+        _agregar_contenido_escrolable(layout, contenido)
         return tarjeta
 
     def _armar_tarjeta_fechas_especiales(self) -> QFrame:
@@ -625,15 +690,6 @@ class _PanelAvancePeriodo(QWidget):
         _agregar_contenido_escrolable(layout, self.etiqueta_control_pagos)
         return tarjeta
 
-    def _armar_tarjeta_vacia(self, nombre: str) -> QFrame:
-        """Dos cuadritos nuevos sin contenido asignado todavía — pedido
-        explícito de la clienta: quedan en blanco (solo el título) hasta
-        que decida qué va en cada uno."""
-        tarjeta, layout = _tarjeta("(Sin asignar)")
-        setattr(self, f"tarjeta_{nombre}", tarjeta)
-        layout.addStretch()
-        return tarjeta
-
     def actualizar(self) -> None:
         ruta_db = _ruta_base_datos(self.conn)
         self.etiqueta_modo_sin_sincronizar.setVisible(
@@ -692,18 +748,39 @@ class _PanelAvancePeriodo(QWidget):
 
         principales = calcular_estadisticas_principales(self.conn)
         desglose = principales.desglose_liquidaciones
-        self.etiqueta_estadisticas_principales.setText(
-            f"Monto por reservas regulares: {formatear_moneda(principales.monto_regulares)}\n"
-            f"Monto por reservas aisladas: {formatear_moneda(principales.monto_aisladas)}\n"
-            f"Total ingresos: {formatear_moneda(principales.total_ingresos)}\n"
-            f"Gastos operativos: {formatear_moneda(principales.gastos_operativos)}\n"
-            f"Balance de negocio: {formatear_moneda(principales.balance_negocio)}\n"
-            f"Total liquidado: {formatear_moneda(principales.total_liquidado)}\n"
-            f"  Descuento por feriados: {formatear_moneda(desglose.descuento_feriados)}\n"
-            f"  Descuento por vacaciones y licencias: {formatear_moneda(desglose.descuento_vacaciones_licencias)}\n"
-            f"  Reservas aisladas en liquidaciones: {formatear_moneda(desglose.aisladas_en_liquidaciones)}\n"
-            f"  Cuotas de planes de pago en liquidaciones: {formatear_moneda(desglose.cuotas_planes_pago)}\n"
-            f"Saldo pendiente de cobro (de lo liquidado): {formatear_moneda(principales.saldo_pendiente)}"
+        fuera = principales.desglose_fuera_liquidacion
+        self.etiqueta_detalle_liquidaciones.setText(
+            f"Monto neto reservas regulares: {formatear_moneda(desglose.monto_neto_reservas_regulares)}\n"
+            f"Descuentos por feriados no trabajados: {formatear_moneda(desglose.descuento_feriados)}\n"
+            f"Descuentos por vacaciones: {formatear_moneda(desglose.descuento_vacaciones)}\n"
+            f"Descuentos por licencias: {formatear_moneda(desglose.descuento_licencias)}\n"
+            f"Reservas aisladas: {formatear_moneda(desglose.aisladas_en_liquidaciones)}\n"
+            f"Feriados trabajados: {formatear_moneda(desglose.feriados_trabajados)}\n"
+            f"Cargos especiales: {formatear_moneda(desglose.cargos_especiales)}\n"
+            f"Cuotas de planes de pago: {formatear_moneda(desglose.cuotas_planes_pago)}\n"
+            f"Otros ajustes: {formatear_moneda(desglose.otros_ajustes)}"
+        )
+        self.etiqueta_total_liquidado.setText(
+            f"Total liquidado mes en curso: {formatear_moneda(principales.total_liquidado)}"
+        )
+
+        self.etiqueta_detalle_resultado.setText(
+            f"Total liquidado mes en curso: {formatear_moneda(principales.total_liquidado)}\n"
+            f"Horas aisladas por fuera de la liquidación: {formatear_moneda(fuera.aisladas_normales)}\n"
+            f"Reservas extraordinarias por fuera de la liquidación: {formatear_moneda(fuera.reservas_extraordinarias)}\n"
+            f"Otros conceptos por fuera de la liquidación: {formatear_moneda(fuera.otros_conceptos)}\n"
+            f"Gastos operativos: {formatear_moneda(-principales.gastos_operativos)}"
+        )
+        self.etiqueta_balance_negocio.setText(
+            f"Balance del negocio: {formatear_moneda(principales.balance_negocio)}"
+        )
+
+        self.etiqueta_detalle_cobro.setText(
+            f"Monto liquidado más horas aisladas: {formatear_moneda(principales.monto_a_cobrar_base)}\n"
+            f"Monto cobrado hasta el momento: {formatear_moneda(-principales.monto_cobrado)}"
+        )
+        self.etiqueta_monto_restante_a_cobrar.setText(
+            f"Monto restante del mes a cobrar: {formatear_moneda(principales.monto_restante_a_cobrar)}"
         )
 
         ocup = calcular_estadisticas_ocupacion(self.conn)

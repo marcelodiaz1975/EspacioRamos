@@ -4,7 +4,7 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.balance import resultado_periodo
+from app.negocio.balance import total_gastos_periodo
 from app.negocio.panel_control import (
     _proxima_ocurrencia,
     calcular_estadisticas_ocupacion,
@@ -200,56 +200,107 @@ def test_estadisticas_ocupacion_por_unidad_ordena_pb_antes_que_pisos(conn):
     assert nombres == ["Ramos 1 - PB", "Ramos 1 - 1A"]
 
 
-def test_estadisticas_principales_monto_aisladas_y_saldo_pendiente(conn):
-    """El monto generado por aisladas (antes vivía en `EstadisticasOcupacion.
-    monto_aisladas_mes`) y el saldo pendiente (antes `saldo_pendiente_mes`)
-    se mudaron acá, al cuadrito "Estadísticas principales mes en curso" —
-    pedido explícito de la clienta, sin duplicarse en "Ocupación y horas"."""
+def test_estadisticas_principales_monto_cobrado_acota_por_profesional(conn):
+    """Rediseño completo del cuadrito "Estadísticas principales mes en
+    curso" (pedido explícito de la clienta): "Monto cobrado hasta el
+    momento" (sección "Monto a cobrar en el mes en curso") suma lo
+    cobrado de cada R (`desglose_liquidaciones.cobrado_r`), acotado a no
+    superar lo que ESE profesional generó — mismo bug real que antes
+    afectaba al extinto "saldo pendiente" ($10.000 liquidado, uno debía
+    $500 y pagó $600, el otro debía $9.500 y no pagó nada: el sobrepago
+    de uno no puede "tapar" lo pendiente del otro). A diferencia de la
+    ronda anterior, "Total liquidado" ya no lee el `MontoGenerado`
+    FROZEN — se recalcula EN VIVO con `calcular_liquidacion`, así que
+    hace falta una reserva real para que el monto no sea cero."""
+    from app.negocio.liquidaciones import emitir_liquidacion
+
     _fijar_fecha(conn, "2026-08-15")
-    id_prof = _profesional(conn)
+    periodo = "2026-08"
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
     id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
-        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=1000,
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000,
     )
-    obtener_repositorio(conn, "ReservaAislada").crear(
-        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha="2026-08-10", HoraInicio=9, HoraFin=11,
+    id_sobrepaga = _profesional(conn, Apellido="Sobrepaga")
+    id_debe = _profesional(conn, Apellido="Debe")
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_sobrepaga, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=11, VigenciaInicio="2026-01-01",
     )
-    obtener_repositorio(conn, "LiquidacionEmitida").crear(
-        IdProfesional=id_prof, Periodo="2026-08", MontoGenerado=10000,
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_debe, IdConsultorio=id_consultorio, DiaSemana="Martes",
+        HoraInicio=10, HoraFin=11, VigenciaInicio="2026-01-01",
     )
-    # Monto NEGATIVO: un pago real se guarda así (reduce lo que debe,
-    # ver `app.negocio.pagos.registrar_pago`), nunca en positivo.
+    _, liq_sobrepaga = emitir_liquidacion(
+        conn, id_profesional=id_sobrepaga, periodo=periodo, fecha_emision="2026-08-20",
+    )
+    _, liq_debe = emitir_liquidacion(conn, id_profesional=id_debe, periodo=periodo, fecha_emision="2026-08-20")
+    # Sobrepaga el doble de lo que generó (queda a favor del próximo mes,
+    # no tiene que sumar de más al "monto cobrado"); el otro no paga nada.
     obtener_repositorio(conn, "HistorialPagos").crear(
-        IdProfesional=id_prof, Monto=-4000, PeriodoImputado="2026-08",
-    )
-    # Pago de otro período no debe afectar el saldo pendiente de agosto.
-    obtener_repositorio(conn, "HistorialPagos").crear(
-        IdProfesional=id_prof, Monto=-1000, PeriodoImputado="2026-07",
+        IdProfesional=id_sobrepaga, Monto=-(liq_sobrepaga.monto_generado * 2), PeriodoImputado=periodo,
     )
     principales = calcular_estadisticas_principales(conn)
-    assert principales.monto_aisladas == pytest.approx(2000.0)
-    assert principales.total_liquidado == pytest.approx(10000.0)
-    assert principales.saldo_pendiente == pytest.approx(6000.0)
+    assert principales.total_liquidado == pytest.approx(liq_sobrepaga.monto_generado + liq_debe.monto_generado)
+    assert principales.monto_cobrado == pytest.approx(liq_sobrepaga.monto_generado)  # acotado, no el doble
+    assert principales.monto_restante_a_cobrar == pytest.approx(liq_debe.monto_generado)
 
 
-def test_estadisticas_principales_total_liquidado_no_duplica_reemisiones(conn):
+def test_estadisticas_principales_monto_cobrado_un_ajuste_positivo_no_cuenta_como_cobrado(conn):
+    """Mismo criterio que ya usaba el extinto "saldo pendiente": un
+    "ajuste" (`HistorialPagos.EsAjuste`) imputado al período puede ir en
+    POSITIVO (un cargo que aumenta lo que debe, ver `app.negocio.pagos.
+    registrar_pago`) — a diferencia de un pago real (siempre negativo),
+    este NO puede sumar a "Monto cobrado hasta el momento"."""
+    from app.negocio.liquidaciones import emitir_liquidacion
+
+    _fijar_fecha(conn, "2026-08-15")
+    periodo = "2026-08"
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000,
+    )
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=11, VigenciaInicio="2026-01-01",
+    )
+    _, liq = emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo, fecha_emision="2026-08-20")
+    obtener_repositorio(conn, "HistorialPagos").crear(
+        IdProfesional=id_prof, Monto=200, PeriodoImputado=periodo, EsAjuste=1,
+    )
+    principales = calcular_estadisticas_principales(conn)
+    assert principales.monto_cobrado == 0.0
+    assert principales.monto_restante_a_cobrar == pytest.approx(liq.monto_generado)
+
+
+def test_desglose_liquidaciones_no_duplica_profesionales_con_varias_reemisiones(conn):
     """Caso real de la clienta: "estuve haciendo un par de pruebas con las
     emisiones de liquidaciones" dejó varias filas de `LiquidacionEmitida`
     para el mismo profesional/período (cada reemisión crea una fila
-    nueva, con el monto TOTAL de esa emisión — ver `emitir_liquidacion`),
-    y "Total liquidado" las sumaba todas en vez de quedarse solo con la
-    última de cada profesional."""
+    nueva — ver `emitir_liquidacion`); el desglose identifica a qué
+    profesionales recalcularle la liquidación agrupando por
+    `IdProfesional` (`GROUP BY`), así que varias reemisiones del mismo
+    no lo hacen entrar más de una vez al loop ni duplican su aporte."""
+    from app.negocio.liquidaciones import emitir_liquidacion
+
     _fijar_fecha(conn, "2026-08-15")
-    id_prof1 = _profesional(conn)
-    id_prof2 = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Otro")
-    repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
-    repo_liq.crear(IdProfesional=id_prof1, Periodo="2026-08", MontoGenerado=100000, EsReemision=0)
-    repo_liq.crear(IdProfesional=id_prof1, Periodo="2026-08", MontoGenerado=150000, EsReemision=1)
-    repo_liq.crear(IdProfesional=id_prof1, Periodo="2026-08", MontoGenerado=120000, EsReemision=1)
-    repo_liq.crear(IdProfesional=id_prof2, Periodo="2026-08", MontoGenerado=50000, EsReemision=0)
-    principales = calcular_estadisticas_principales(conn)
-    assert principales.total_liquidado == pytest.approx(170000.0)  # última de prof1 (120000) + prof2 (50000)
+    periodo = "2026-08"
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraRegularActual=1000,
+    )
+    id_prof = _profesional(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01",
+    )
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo, fecha_emision="2026-08-20")
+    _, liq = emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo, fecha_emision="2026-08-21")
+    desglose = calcular_estadisticas_principales(conn).desglose_liquidaciones
+    assert desglose.total == pytest.approx(liq.monto_generado)
 
 
 def test_desglose_liquidaciones_feriados_vacaciones_aisladas_y_cuotas(conn):
@@ -296,7 +347,8 @@ def test_desglose_liquidaciones_feriados_vacaciones_aisladas_y_cuotas(conn):
     descuento_pct = obtener_porcentaje_descuento(conn, 2)
     monto_feriado_esperado = 2 * 1000 * (1 - descuento_pct / 100)
     assert desglose.descuento_feriados == pytest.approx(-monto_feriado_esperado)
-    assert desglose.descuento_vacaciones_licencias < 0
+    assert desglose.descuento_vacaciones < 0
+    assert desglose.descuento_licencias == 0.0
     assert desglose.aisladas_en_liquidaciones == pytest.approx(2 * 500)
     assert desglose.cuotas_planes_pago == pytest.approx(100)
 
@@ -314,67 +366,27 @@ def test_desglose_liquidaciones_ignora_profesionales_sin_liquidacion_mensual_pro
 
     desglose = calcular_estadisticas_principales(conn).desglose_liquidaciones
 
-    assert desglose.descuento_feriados == 0.0
-    assert desglose.descuento_vacaciones_licencias == 0.0
-    assert desglose.aisladas_en_liquidaciones == 0.0
-    assert desglose.cuotas_planes_pago == 0.0
+    assert desglose.total == 0.0
+    assert desglose.cobrado_r == 0.0
 
 
-def test_estadisticas_principales_saldo_pendiente_no_resta_el_sobrepago_de_un_profesional(conn):
-    """Bug real encontrado y arreglado (pedido explícito de la clienta,
-    ejemplo dado): total liquidado $10.000 — un profesional debía $500
-    y pagó $600 (deja $100 a favor del próximo mes), el otro debía
-    $9.500 y no pagó nada. El saldo pendiente tiene que ser $9500, no
-    $9400: el sobrepago de uno no puede reducir el saldo pendiente del
-    otro, tiene que quedar acotado profesional por profesional."""
-    _fijar_fecha(conn, "2026-08-15")
-    id_prof_sobrepaga = _profesional(conn, Apellido="Sobrepaga")
-    id_prof_debe = _profesional(conn, Apellido="Debe")
-    repo_liq = obtener_repositorio(conn, "LiquidacionEmitida")
-    repo_liq.crear(IdProfesional=id_prof_sobrepaga, Periodo="2026-08", MontoGenerado=500)
-    repo_liq.crear(IdProfesional=id_prof_debe, Periodo="2026-08", MontoGenerado=9500)
-    # Monto NEGATIVO: un pago real se guarda así (reduce lo que debe,
-    # ver `app.negocio.pagos.registrar_pago`), nunca en positivo.
-    obtener_repositorio(conn, "HistorialPagos").crear(
-        IdProfesional=id_prof_sobrepaga, Monto=-600, PeriodoImputado="2026-08",
-    )
-    principales = calcular_estadisticas_principales(conn)
-    assert principales.total_liquidado == pytest.approx(10000.0)
-    assert principales.saldo_pendiente == pytest.approx(9500.0)
-
-
-def test_estadisticas_principales_saldo_pendiente_un_ajuste_positivo_suma_deuda_del_periodo(conn):
-    """Caso real encontrado con la base de datos de la clienta: un
-    "ajuste" (`HistorialPagos.EsAjuste`) imputado al período puede ir en
-    POSITIVO (un cargo que aumenta lo que debe, ver `app.negocio.pagos.
-    registrar_pago`) — a diferencia de un pago real (siempre negativo),
-    este sí tiene que SUMAR al saldo pendiente del período, nunca
-    restarle."""
-    _fijar_fecha(conn, "2026-08-15")
-    id_prof = _profesional(conn)
-    obtener_repositorio(conn, "LiquidacionEmitida").crear(
-        IdProfesional=id_prof, Periodo="2026-08", MontoGenerado=1000,
-    )
-    obtener_repositorio(conn, "HistorialPagos").crear(
-        IdProfesional=id_prof, Monto=200, PeriodoImputado="2026-08", EsAjuste=1,
-    )
-    principales = calcular_estadisticas_principales(conn)
-    assert principales.saldo_pendiente == pytest.approx(1200.0)
-
-
-def test_estadisticas_principales_total_ingresos_y_balance_reusan_balance_del_negocio(conn):
-    """"Total ingresos"/"Gastos operativos"/"Balance de negocio" son los
-    mismos tres valores que ya calcula `app.negocio.balance.resultado_
-    periodo` para todo el espacio, sin ningún alcance de ubicación."""
+def test_estadisticas_principales_balance_negocio_es_liquidado_mas_fuera_menos_gastos(conn):
+    """"Balance del negocio" (sección "Resultado del negocio" del
+    cuadrito, rediseño completo) = Total liquidado mes en curso + lo que
+    generan los profesionales A por fuera de cualquier liquidación -
+    Gastos operativos del período — sin ningún alcance de ubicación
+    (`total_gastos_periodo` sin ningún id_* es el mismo cálculo "todo el
+    espacio" que ya usa Balance del negocio)."""
     _fijar_fecha(conn, "2026-08-15")
     obtener_repositorio(conn, "GastoOperativo").crear(
         Periodo="2026-08", Monto=500, Alcance="Espacio general", Concepto="Limpieza",
     )
     principales = calcular_estadisticas_principales(conn)
-    ingresos, gastos, balance = resultado_periodo(conn, "2026-08")
-    assert principales.total_ingresos == pytest.approx(ingresos)
+    gastos = total_gastos_periodo(conn, "2026-08")
     assert principales.gastos_operativos == pytest.approx(gastos)
-    assert principales.balance_negocio == pytest.approx(balance)
+    assert principales.balance_negocio == pytest.approx(
+        principales.total_liquidado + principales.desglose_fuera_liquidacion.bruto - gastos
+    )
 
 
 def test_fechas_especiales_proximas_dos_meses_excluye_las_que_ya_pasaron_este_mes(conn):

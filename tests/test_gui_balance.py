@@ -66,8 +66,7 @@ def test_ingresos_arranca_en_el_periodo_actual_con_una_sola_fila(qtbot, conn):
     assert panel.tabla.rowCount() == 1
     assert panel.tabla.item(0, 0).text() == periodo_actual(conn)
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
-        "Período", "Ingreso por horas regulares", "Ingreso por horas aisladas",
-        "Ingreso por feriados\ny días especiales", "Total ingresos",
+        "Período", "Monto total liquidado", "Ingresos por fuera de las liquidaciones", "Total ingresos",
     ]
 
 
@@ -105,6 +104,12 @@ def test_ingresos_filtros_de_ubicacion_arrancan_en_todas_todos(qtbot, conn):
 
 
 def test_ingresos_recalcula_al_cambiar_periodo(qtbot, conn):
+    """"Monto total liquidado" (rediseño completo, ver CLAUDE.md) es el
+    `MontoGenerado` FROZEN de la última emisión de cada profesional —
+    hace falta emitir la liquidación del período, no alcanza con cargar
+    la reserva."""
+    from app.negocio.liquidaciones import emitir_liquidacion
+
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1")
     id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
@@ -115,6 +120,8 @@ def test_ingresos_recalcula_al_cambiar_periodo(qtbot, conn):
         IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
         HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01", VigenciaFin=None,
     )
+    conn.commit()
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo="2026-08", fecha_emision="2026-08-20")
     conn.commit()
 
     pantalla = PantallaBalanceDelNegocio(conn)

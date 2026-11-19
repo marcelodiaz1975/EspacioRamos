@@ -80,8 +80,7 @@ _ANCHO_PANEL_FILTROS = 240
 _COLCHON_TITULO_COLUMNA = 12
 
 _COLUMNAS_INGRESOS = [
-    "Período", "Ingreso por horas regulares", "Ingreso por horas aisladas",
-    "Ingreso por feriados\ny días especiales", "Total ingresos",
+    "Período", "Monto total liquidado", "Ingresos por fuera de las liquidaciones", "Total ingresos",
 ]
 _COLUMNAS_RESULTADO = ["Período", "Total ingresos", "Total gastos", "Balance del período"]
 
@@ -822,18 +821,17 @@ class _PanelIngresos(_PanelFiltrosMixin, QWidget):
         layout_externo.addWidget(self.tabla, stretch=1)
 
     def _fila(self, periodo: str, ids_consultorio: list[int] | None) -> tuple:
-        regulares, aisladas, feriados_trabajados = total_ingresos_periodo(self.conn, periodo, ids_consultorio)
-        total = regulares + aisladas + feriados_trabajados
-        return periodo, regulares, aisladas, feriados_trabajados, total
+        liquidado, fuera_de_liquidacion = total_ingresos_periodo(self.conn, periodo, ids_consultorio)
+        total = liquidado + fuera_de_liquidacion
+        return periodo, liquidado, fuera_de_liquidacion, total
 
     def _llenar_filas(self, filas: list[tuple]) -> None:
         self.tabla.setRowCount(len(filas))
-        for fila_idx, (periodo, regulares, aisladas, feriados_trabajados, total) in enumerate(filas):
+        for fila_idx, (periodo, liquidado, fuera_de_liquidacion, total) in enumerate(filas):
             self.tabla.setItem(fila_idx, 0, item_centrado(periodo))
-            self.tabla.setItem(fila_idx, 1, item_monto(regulares))
-            self.tabla.setItem(fila_idx, 2, item_monto(aisladas))
-            self.tabla.setItem(fila_idx, 3, item_monto(feriados_trabajados))
-            self.tabla.setItem(fila_idx, 4, item_monto(total))
+            self.tabla.setItem(fila_idx, 1, item_monto(liquidado))
+            self.tabla.setItem(fila_idx, 2, item_monto(fuera_de_liquidacion))
+            self.tabla.setItem(fila_idx, 3, item_monto(total))
 
     def _ids_consultorio(self) -> list[int] | None:
         return _ids_consultorio_del_alcance(

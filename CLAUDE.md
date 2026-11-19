@@ -1164,3 +1164,200 @@ marca_azul_ese_mes` (noviembre queda azul, diciembre sigue celeste —
 extraordinaria_de_profesional_a_marca_mensaje_generado_queda_azul`.
 pyflakes limpio en `app/gui/pantallas/reservas.py`.
 
+## Panel de control ("Avance de período, backup, y vista rápida"): rediseño completo de la grilla + "Estadísticas principales mes en curso" con tres cuentas en cascada; Balance del negocio ("Ingresos"): columnas rediseñadas
+
+Pedido explícito de la clienta, mensaje textual (ver el hilo completo
+para la redacción exacta de cada línea — se resume acá el resultado):
+"Vamos a rediseñar la solapa... El tercer cuadro 'Ocupación y horas mes
+en curso' ponelo en el segundo cuadro... El sexto cuadro 'Cumpleaños y
+días de profesión' lo pones debajo del cuadro 'Feriados y fechas
+especiales próximas'... Quedaron libres los tres cuadros de la derecha,
+esos los vamos a unificar, queda un solo cuadro largo, ahi vamos a
+poner todas las estadísticas mas detalladas". Avisó explícitamente:
+"Avisame por cualquier duda, comentario o sugerencia" — se le hicieron
+4 preguntas de aclaración antes de tocar código (ver abajo, cada una
+cambió o confirmó una parte del diseño).
+
+### Grilla: de 3x3 pareja a 2 columnas de 3 + 1 columna larga
+
+La clienta corrigió por su cuenta una primera lectura equivocada del
+pedido (yo había asumido que el séptimo cuadro quedaba "mezclado" con
+Feriados en el mismo marco — nunca fue así, los corrigió antes de que
+se tocara código): "Van a quedar dos columnas de tres cuadritos, y una
+columna entera de un solo cuadro a la derecha, en total son 7, 6 chicos
+y uno largo." Con el orden exacto que dio:
+
+- Columna 1 (de arriba a abajo): "Período actual y último backup",
+  "Profesionales", "Control de pagos".
+- Columna 2 (de arriba a abajo): "Ocupación y horas mes en curso",
+  "Feriados y fechas especiales próximas", "Cumpleaños y días de
+  profesión".
+- Columna 3: un solo cuadro LARGO, "Estadísticas principales mes en
+  curso" (ver abajo).
+
+Se eliminan los dos cuadritos "(Sin asignar)" que habían quedado libres
+de la ronda anterior — ya no hace falta nada vacío en este diseño.
+`_armar_ui` (`app/gui/pantallas/panel_control.py`) pasa del loop
+genérico sobre una grilla 3x3 (`QHBoxLayout` por fila) a dos `QVBoxLayout`
+("columna_1"/"columna_2", tres cuadritos cada una con `stretch=1`) más
+un `QHBoxLayout` externo ("fila_columnas") que pone esas dos columnas
+y la tarjeta larga como tres hermanos, los tres con `stretch=1` — así
+las tres "columnas" quedan del mismo ancho, y la columna larga queda
+del alto de las otras dos juntas (sus tres cuadritos chicos + el
+espaciado entre ellos). Se elimina `_armar_tarjeta_vacia` (de baja, sin
+otro uso) y la constante `_COLUMNAS_GRILLA` (ya no hace falta, el
+armado deja de ser un loop genérico sobre N columnas).
+
+### "Estadísticas principales mes en curso": rediseño completo, tres cuentas en cascada
+
+Diseño pedido por la clienta, tres secciones con subtítulo en itálica,
+línea divisoria antes del total, y el total en negrita:
+
+1. **"Liquidaciones mes en curso"**: Monto neto reservas regulares +
+   Descuentos por feriados no trabajados (resta) + Descuentos por
+   vacaciones (resta) + Descuentos por licencias (resta) + Reservas
+   aisladas + Feriados trabajados + Cargos especiales + Cuotas de
+   planes de pago + Otros ajustes = **Total liquidado mes en curso**.
+2. **"Resultado del negocio"**: Total liquidado mes en curso + Horas
+   aisladas por fuera de la liquidación + Reservas extraordinarias por
+   fuera de la liquidación + Otros conceptos por fuera de la
+   liquidación − Gastos operativos = **Balance del negocio**.
+3. **"Monto a cobrar en el mes en curso"**: Monto liquidado más horas
+   aisladas − Monto cobrado hasta el momento = **Monto restante del
+   mes a cobrar**.
+
+Cuatro preguntas de aclaración, y las cuatro decisiones que fijaron:
+
+- **Q1** (si "Monto total liquidado" en Ingresos/Resultado debía seguir
+  filtrando por ubicación): la clienta eligió la opción recomendada,
+  "Deja de filtrarse por ubicación" — una liquidación es por
+  PROFESIONAL, no se puede partir prolijamente por Consultorio (los
+  descuentos de feriados/vacaciones no son por ubicación).
+- **Q2** (qué hacer con los conceptos más raros de una liquidación —
+  reversión de descuento, feriados pendientes, horas agregadas, ajuste
+  por saldo atrasado, ajuste de redondeo — que no tenían línea propia
+  en el diseño original de 8 líneas): "Sumarlos en una línea extra
+  'Otros ajustes'" — así "Total liquidado mes en curso" cierra SIEMPRE
+  exacto con la suma de las liquidaciones recalculadas, nunca "si no
+  coincide es porque falta algún concepto".
+- **Q3** (cómo tratar lo que generan los profesionales categoría A por
+  fuera de cualquier liquidación, más allá de las aisladas): la
+  clienta agregó, con el mismo criterio que "Horas aisladas por fuera
+  de la liquidación", dos líneas más — "Reservas extraordinarias por
+  fuera de la liquidación" y "Otros conceptos por fuera de la
+  liquidación" (llaves + cargos especiales sueltos) — y pidió que
+  "Monto cobrado hasta el momento" considere los tres para que la
+  cuenta cierre ("las horas aisladas, las reservas extraordinarias y
+  los conceptos especiales"). En "Ingresos" (Balance del negocio), la
+  columna pasa a llamarse "Ingresos por fuera de las liquidaciones" y
+  reflejar la suma de esos mismos tres conceptos.
+- **Q4** (la disposición exacta de la grilla): corrigió una lectura
+  equivocada mía (ver arriba) y dio el orden exacto de las dos
+  columnas de 3 + la columna larga.
+
+### Negocio: `DesgloseLiquidaciones` (10 campos) + `DesgloseFueraDeLiquidacion` (nueva, en `balance.py`)
+
+`app/negocio/panel_control.py`, `DesgloseLiquidaciones` pasa de 4
+campos a 8 líneas visibles + `otros_ajustes` (catch-all) + `cobrado_r`
+(no se muestra como línea propia, solo alimenta la Sección 3) — los 8+1
+campos suman EXACTO la misma fórmula que `Liquidacion.monto_generado`
+(verificado término a término contra esa property), así que "Total
+liquidado mes en curso" (`DesgloseLiquidaciones.total`, property nueva)
+nunca puede "no coincidir" por faltar un concepto. `_desglose_
+liquidaciones_periodo` sigue recalculando EN VIVO con `calcular_
+liquidacion` para cada profesional con una liquidación emitida este
+período (igual que antes) — `cobrado_r` se calcula reusando la fórmula
+ya establecida de "pendiente acotado por profesional" (`pendiente =
+max(monto_generado + pagado, 0)`, con `pagado` negativo para un pago
+real) y derivando `cobrado = monto_generado - pendiente`.
+
+`app/negocio/balance.py` suma `DesgloseFueraDeLiquidacion` (`aisladas_
+normales`/`reservas_extraordinarias`/`otros_conceptos`/`cobrado`, +
+property `bruto`) y `fuera_de_liquidacion_periodo`: recorre cada
+profesional categoría A (nunca tiene liquidación mensual propia) y
+arma, por `Fecha` real del movimiento (a diferencia del desglose de
+arriba, que mira si algo "entra" en una liquidación, no la fecha real):
+aisladas comunes (mismo criterio que `app.negocio.mensajes.
+movimiento_periodo_aislada`, duplicado a propósito en vez de reusar esa
+función para no tocar un camino compartido con Centro de mensajería —
+mismo criterio de duplicación aceptada entre módulos sin relación que
+ya usa el resto del sistema), reservas extraordinarias (`MontoExtraordinario`
+a mano), y "otros conceptos" (depósitos/reintegros de `LlaveMovimiento`
++ `CargoEspecial` sin `IdLlave`, para no contar dos veces un cargo ya
+atado a una llave). `cobrado` usa el mismo tope por profesional que
+`cobrado_r`.
+
+`monto_liquidado_periodo` (nueva, `balance.py`) reemplaza a la vieja
+`_total_liquidado_periodo` de `panel_control.py` (de baja, junto con
+`_saldo_pendiente_periodo`, también de baja) — es el valor FROZEN (el
+`MontoGenerado` real tal como se facturó, con los valores vigentes al
+emitir cada liquidación), a propósito DISTINTO del recálculo en vivo
+de `DesgloseLiquidaciones` — Ingresos/Resultado pueden mostrar
+cualquier período histórico, así que no tiene sentido reconstruirlo con
+tarifas de HOY. Los dos valores coinciden en el caso normal (nada
+cambió desde la emisión) pero pueden divergir si algo cambió después
+— divergencia aceptada, documentada en el docstring de la función.
+`ingresos_feriados_trabajados_periodo` queda eliminada (de baja, sin
+otro consumidor) — ese concepto ya viene incluido dentro del
+`MontoGenerado` congelado.
+
+`total_ingresos_periodo` pasa a devolver `(monto_liquidado, fuera_de_
+liquidacion_bruto)` en vez de la tupla de 3 vieja — `ids_consultorio`
+queda como parámetro sin usar (compatibilidad de firma con
+`resultado_periodo`, que SÍ sigue filtrando Gastos operativos por
+ubicación). `resultado_periodo` no cambia de firma, solo de qué suma
+para "ingresos".
+
+### GUI: `app/gui/pantallas/panel_control.py` y `app/gui/pantallas/balance.py`
+
+`_armar_tarjeta_estadisticas_principales` deja de ser un solo `QLabel`:
+pasa a ser un `QWidget` con su propio `QVBoxLayout` (mismo patrón que
+"Período actual y último backup") con, por cada una de las tres
+secciones, un subtítulo en itálica (`_subtitulo_italica`, nuevo
+helper), una etiqueta de detalle (`QLabel` con las líneas de esa
+sección), una línea divisoria (`_linea_divisoria`, ya existía) y una
+etiqueta de total en negrita (`setStyleSheet("font-weight: bold;")`) —
+con una línea de espacio (`addSpacing(12)`) entre una sección y la
+siguiente. `actualizar()` llena cada una de esas seis etiquetas por
+separado en vez de un único `setText` con todo el bloque.
+
+"Ingresos" (`_PanelIngresos`, `balance.py`): `_COLUMNAS_INGRESOS` pasa
+de 5 columnas a 4 (`"Período"`, `"Monto total liquidado"`, `"Ingresos
+por fuera de las liquidaciones"`, `"Total ingresos"` — se elimina la
+columna de feriados y días especiales, ya absorbida dentro de "Monto
+total liquidado"); `_fila`/`_llenar_filas` desempaquetan la tupla nueva
+de 2 valores de `total_ingresos_periodo` en vez de la de 3. "Resultado"
+no cambia de columnas, solo hereda el "Total ingresos" nuevo.
+
+### Tests
+
+`tests/test_balance.py`: reescritos los tests de `total_ingresos_
+periodo` (ahora usa `emitir_liquidacion` real en vez de calcular en
+vivo desde reservas sueltas — el "monto liquidado" es FROZEN), eliminado
+el test de `ingresos_feriados_trabajados_periodo` (función de baja),
++1 nuevo (`test_fuera_de_liquidacion_periodo_desglosa_tres_conceptos_y_
+acota_el_cobrado`, con aislada+extraordinaria+llave+pago de más).
+`tests/test_panel_control.py`: reescritos los tests de "saldo
+pendiente" (ya no existe — ahora prueban `monto_cobrado`/`monto_
+restante_a_cobrar`, con reservas reales + `emitir_liquidacion` en vez
+de filas de `LiquidacionEmitida` a mano, porque el recálculo en vivo ya
+no lee `MontoGenerado`), reescrito el test de "no duplica reemisiones"
+(ahora prueba que el `GROUP BY` no recalcula dos veces al mismo
+profesional), actualizados los nombres de campo en los tests de
+desglose (`descuento_vacaciones_licencias` → `descuento_vacaciones`/
+`descuento_licencias`). `tests/test_gui_panel_control.py`: eliminados
+los tests de los cuadritos vacíos y de "siete tarjetas"/"tres filas"
+(de baja), +4 nuevos sobre la tarjeta larga (`test_seis_tarjetas_
+chicas_y_la_tarjeta_larga_quedan_del_mismo_ancho`, `test_tarjeta_larga_
+queda_del_alto_de_sus_tres_hermanas_chicas`, `test_tarjeta_
+estadisticas_principales_tres_subtitulos_en_itálica_y_en_orden`, `test_
+tarjeta_estadisticas_principales_orden_de_las_tres_secciones`), 1
+corregido (`test_hay_una_linea_divisoria_entre_los_dos_botones`, acotado
+a las líneas hijas directas del panel, ya que la tarjeta larga suma sus
+propias tres). `tests/test_gui_balance.py`: encabezados de "Ingresos"
+actualizados, `test_ingresos_recalcula_al_cambiar_periodo` reescrito
+con `emitir_liquidacion` real. Suite completa de los cuatro archivos de
+negocio/GUI tocados: sin regresiones nuevas (ver CLAUDE.md, "Fallos
+conocidos del sandbox/contenedor" para los ~10 fallos preexistentes
+ajenos a esta ronda). pyflakes limpio en los ocho archivos tocados.
+

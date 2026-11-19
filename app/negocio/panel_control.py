@@ -14,7 +14,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import date
 
-from app.negocio.balance import resultado_periodo
+from app.negocio.balance import DesgloseFueraDeLiquidacion, fuera_de_liquidacion_periodo, total_gastos_periodo
 from app.negocio.dias import (
     fecha_actual,
     fecha_real,
@@ -24,12 +24,7 @@ from app.negocio.dias import (
     sumar_meses,
     ultimo_dia_mes,
 )
-from app.negocio.estadisticas import (
-    _horas_regulares_semanales_en_fecha,
-    calcular_ocupacion,
-    monto_neto_aislada_periodo,
-    monto_neto_regular_periodo,
-)
+from app.negocio.estadisticas import _horas_regulares_semanales_en_fecha, calcular_ocupacion
 from app.negocio.liquidaciones import calcular_liquidacion
 from app.pdf.estilos import clave_orden_unidad
 from app.repositorio.registro import obtener_repositorio
@@ -159,81 +154,6 @@ def _horas_aisladas_periodo(
     return sum(f["HoraFin"] - f["HoraInicio"] for f in filas)
 
 
-def _total_liquidado_periodo(conn: sqlite3.Connection, periodo: str) -> float:
-    """Suma `MontoGenerado` de la ÚLTIMA emisión de cada profesional para
-    este período, nunca de todas sus filas — `emitir_liquidacion` crea
-    una fila NUEVA en cada reemisión (cada una con el monto TOTAL de esa
-    emisión, no un delta: el delta solo se usa para `SaldoCuentaActual`,
-    ver su docstring), así que sumar todas las filas cuenta de más cada
-    reemisión de prueba que haya hecho el operador para el mismo
-    profesional/período — reproducido con un script: 3 emisiones de
-    $100.000 para el mismo profesional daban $300.000 en vez de
-    $100.000."""
-    return conn.execute(
-        """
-        SELECT COALESCE(SUM(MontoGenerado), 0) AS total FROM LiquidacionEmitida
-        WHERE Periodo = ? AND IdLiquidacion IN (
-            SELECT MAX(IdLiquidacion) FROM LiquidacionEmitida WHERE Periodo = ? GROUP BY IdProfesional
-        )
-        """,
-        (periodo, periodo),
-    ).fetchone()["total"]
-
-
-def _saldo_pendiente_periodo(conn: sqlite3.Connection, periodo: str) -> float:
-    """"Cuánto queda por cobrar de este mes": lo facturado en el período
-    (`LiquidacionEmitida.MontoGenerado` de la ÚLTIMA emisión de cada
-    profesional, mismo criterio que `_total_liquidado_periodo`) más el
-    NETO de los movimientos imputados a ese mismo período
-    (`HistorialPagos.Monto` — ver `app.negocio.pagos.registrar_pago`:
-    "negativo se resta de la cuenta del profesional (un pago recibido,
-    que reduce lo que debe), positivo se suma (un cargo, que aumenta lo
-    que debe)", así que SUMAR el neto, no restarlo, es lo que corresponde
-    al signo real) — PERO si un profesional pagó de más (ej. debía $500
-    y pagó $600), el excedente ($100) queda a favor del próximo mes y NO
-    se cuenta acá.
-
-    Bug real encontrado y arreglado DOS veces sobre este mismo cálculo:
-
-    1) (pedido explícito de la clienta, ejemplo dado: total liquidado
-       $10.000, un profesional debía $500, pagó $600 y deja $100 a favor
-       del próximo mes — el saldo pendiente tiene que ser $9500, no
-       $9400): antes se restaba lo cobrado de TODOS los profesionales de
-       una sola vez contra el total liquidado global, sin tope por
-       profesional, así que el sobrepago de uno terminaba reduciendo el
-       saldo pendiente de los demás. Se pasó a calcular profesional por
-       profesional, acotando cada uno a no bajar de $0.
-
-    2) (bug real encontrado con la base de datos REAL de la clienta: el
-       cuadrito mostraba Saldo pendiente $21.242.875, MÁS GRANDE que
-       Total liquidado $14.220.133, algo matemáticamente imposible con
-       este cálculo si el signo fuera el asumido): el arreglo de arriba
-       seguía restando `Pagado` (la suma de `Monto`) asumiendo que un
-       pago real se guarda en positivo — pero `registrar_pago` lo guarda
-       en NEGATIVO (ver arriba). Con el signo real, restar un pago
-       negativo lo SUMA al pendiente en vez de reducirlo — exactamente
-       lo que mostraba la base real (cuanto más había pagado un
-       profesional, más "pendiente" aparecía). Se corrige sumando el
-       neto en vez de restarlo (`Liquidado + Pagado`, con `Pagado`
-       negativo para un pago real), acotado igual que antes a no bajar
-       de $0 por profesional."""
-    filas = conn.execute(
-        """
-        SELECT le.MontoGenerado AS Liquidado, COALESCE(pagos.Total, 0) AS Pagado
-        FROM LiquidacionEmitida le
-        LEFT JOIN (
-            SELECT IdProfesional, SUM(Monto) AS Total FROM HistorialPagos
-            WHERE PeriodoImputado = ? GROUP BY IdProfesional
-        ) pagos ON pagos.IdProfesional = le.IdProfesional
-        WHERE le.Periodo = ? AND le.IdLiquidacion IN (
-            SELECT MAX(IdLiquidacion) FROM LiquidacionEmitida WHERE Periodo = ? GROUP BY IdProfesional
-        )
-        """,
-        (periodo, periodo, periodo),
-    ).fetchall()
-    return sum(max(f["Liquidado"] + f["Pagado"], 0) for f in filas)
-
-
 def calcular_estadisticas_ocupacion(conn: sqlite3.Connection) -> EstadisticasOcupacion:
     periodo = periodo_actual(conn)
     anio, mes = parsear_periodo(periodo)
@@ -289,95 +209,160 @@ def calcular_estadisticas_ocupacion_por_unidad(conn: sqlite3.Connection) -> list
 
 @dataclass
 class DesgloseLiquidaciones:
-    """Por qué "Total liquidado" no coincide con "Monto por reservas
-    regulares" + "Monto por reservas aisladas" — ver `_desglose_
-    liquidaciones_periodo`. `descuento_feriados`/`descuento_vacaciones_
-    licencias` ya vienen en NEGATIVO (restan); `aisladas_en_
-    liquidaciones`/`cuotas_planes_pago` en positivo (suman)."""
+    """Rediseño completo del cuadrito "Estadísticas principales mes en
+    curso" (sección "Liquidaciones mes en curso"), pedido explícito de
+    la clienta tras preguntar cómo se arma "Total liquidado" — ocho
+    conceptos que suman exactamente la liquidación de cada profesional
+    (`app.negocio.liquidaciones.Liquidacion.monto_generado`), para que
+    el total de este cuadrito cierre SIEMPRE con la suma real de las
+    últimas liquidaciones emitidas del período (nunca "si no coincide
+    es porque falta algún concepto" — `otros_ajustes` es la bolsa que
+    junta todo lo que no tiene una línea propia, para que la cuenta dé
+    exacta igual). `descuento_feriados`/`descuento_vacaciones`/
+    `descuento_licencias` ya vienen en NEGATIVO (restan); el resto en
+    positivo (suman) — `cargos_especiales`/`otros_ajustes` pueden terminar
+    en cualquier signo según lo que haya cargado cada profesional.
+
+    `cobrado_r`: NO es una línea mostrada — es lo que de verdad cobraron
+    los profesionales R este período, acotado a no superar lo que cada
+    uno generó (nunca cuenta el excedente de uno que pagó de más),
+    usado por `app.negocio.panel_control.EstadisticasPrincipales` para
+    armar la sección "Monto a cobrar en el mes en curso"."""
+    monto_neto_reservas_regulares: float
     descuento_feriados: float
-    descuento_vacaciones_licencias: float
+    descuento_vacaciones: float
+    descuento_licencias: float
     aisladas_en_liquidaciones: float
+    feriados_trabajados: float
+    cargos_especiales: float
     cuotas_planes_pago: float
+    otros_ajustes: float
+    cobrado_r: float
+
+    @property
+    def total(self) -> float:
+        return (
+            self.monto_neto_reservas_regulares + self.descuento_feriados + self.descuento_vacaciones
+            + self.descuento_licencias + self.aisladas_en_liquidaciones + self.feriados_trabajados
+            + self.cargos_especiales + self.cuotas_planes_pago + self.otros_ajustes
+        )
 
 
 def _desglose_liquidaciones_periodo(conn: sqlite3.Connection, periodo: str) -> DesgloseLiquidaciones:
-    """Desglosa, para cada profesional con una liquidación emitida este
-    período (última emisión, mismo criterio que `_total_liquidado_
-    periodo`), los conceptos que hacen que "Total liquidado" no
-    coincida con "Monto por reservas regulares" + "Monto por reservas
-    aisladas" (pedido explícito de la clienta, después de preguntar por
-    qué difieren) — el caso real de la clienta con su propia base de
-    datos mostró que el principal era el descuento por feriados no
-    trabajados.
+    """Recalcula la liquidación de cada profesional con `calcular_
+    liquidacion` (AHORA, con los datos y valores vigentes) para cada
+    profesional con una liquidación emitida este período (última
+    emisión de cada uno) — puede no coincidir centavo a centavo con el
+    `MontoGenerado` ya FROZEN en `LiquidacionEmitida` si algo cambió
+    después de emitida (ej. un aumento de tarifas), mismo caso ya
+    documentado para "Monto por reservas regulares"/"aisladas" en
+    rondas anteriores, pero sirve para explicar de un vistazo de dónde
+    sale cada concepto. Categoría E (se consolida en la liquidación de
+    su R) y categoría B (nunca se liquida) no tienen una liquidación
+    propia — `calcular_liquidacion` las rechaza con `ValueError`, se
+    ignoran acá (su aporte ya está contado en la liquidación del R que
+    las consolida).
 
-    Recalcula la liquidación de cada profesional con `calcular_
-    liquidacion` (AHORA, con los datos y valores vigentes), mismo
-    criterio "en vivo" que ya usan `monto_neto_regular_periodo`/
-    `monto_neto_aislada_periodo` en este mismo cuadrito — puede no
-    coincidir centavo a centavo con el `MontoGenerado` ya FROZEN en
-    `LiquidacionEmitida` si algo cambió después de emitida (mismo caso
-    ya documentado para feriados/aisladas), pero sirve para explicar de
-    un vistazo de dónde sale la diferencia, no para una reconciliación
-    exacta. Categoría E (se consolida en la liquidación de su R) y
-    categoría B (nunca se liquida) no tienen una liquidación propia
-    — `calcular_liquidacion` las rechaza con `ValueError`, se ignoran
-    acá (su aporte ya está contado en la liquidación del R que las
-    consolida)."""
+    `otros_ajustes` junta los conceptos más raros de una liquidación,
+    sin línea propia en el cuadrito (pedido explícito de la clienta):
+    reversión del descuento por saldo atrasado, feriados pendientes de
+    un mes anterior agregados tarde, horas regulares agregadas a mitad
+    de mes, ajuste por saldo atrasado, ajuste de redondeo."""
     ids = [
         f["IdProfesional"] for f in conn.execute(
             "SELECT IdProfesional FROM LiquidacionEmitida WHERE Periodo = ? GROUP BY IdProfesional", (periodo,),
         ).fetchall()
     ]
+    monto_neto_reservas_regulares = 0.0
     descuento_feriados = 0.0
-    descuento_vacaciones_licencias = 0.0
+    descuento_vacaciones = 0.0
+    descuento_licencias = 0.0
     aisladas_en_liquidaciones = 0.0
+    feriados_trabajados = 0.0
+    cargos_especiales = 0.0
     cuotas_planes_pago = 0.0
+    otros_ajustes = 0.0
+    cobrado_r = 0.0
     for id_profesional in ids:
         try:
             liq = calcular_liquidacion(conn, id_profesional=id_profesional, periodo=periodo)
         except ValueError:
             continue
-        descuento_feriados -= (
-            liq.total_descuento_feriados + liq.total_descuento_no_laborables + liq.total_feriados_pendientes
-        )
-        descuento_vacaciones_licencias -= liq.total_descuento_vacaciones + liq.total_descuento_licencias
+        monto_neto_reservas_regulares += liq.subtotal_reserva
+        descuento_feriados -= (liq.total_descuento_feriados + liq.total_descuento_no_laborables)
+        descuento_vacaciones -= liq.total_descuento_vacaciones
+        descuento_licencias -= liq.total_descuento_licencias
         aisladas_en_liquidaciones += liq.total_aisladas_mes_anterior + liq.total_aisladas_mes_en_curso
+        feriados_trabajados += (
+            liq.total_feriados_trabajados_mes_anterior + liq.total_feriados_trabajados_mes_en_curso
+        )
+        cargos_especiales += liq.total_cargos_especiales
         cuotas_planes_pago += liq.total_cuotas_plan
+        otros_ajustes += (
+            liq.reversion_descuento - liq.total_feriados_pendientes + liq.total_horas_regulares_agregadas
+            + liq.ajuste_saldo_atrasado + liq.ajuste_redondeo
+        )
+        pagado = conn.execute(
+            "SELECT COALESCE(SUM(Monto), 0) AS total FROM HistorialPagos WHERE IdProfesional = ? "
+            "AND PeriodoImputado = ?",
+            (id_profesional, periodo),
+        ).fetchone()["total"]
+        pendiente = max(liq.monto_generado + pagado, 0)
+        cobrado_r += max(liq.monto_generado - pendiente, 0)
     return DesgloseLiquidaciones(
-        descuento_feriados=descuento_feriados, descuento_vacaciones_licencias=descuento_vacaciones_licencias,
-        aisladas_en_liquidaciones=aisladas_en_liquidaciones, cuotas_planes_pago=cuotas_planes_pago,
+        monto_neto_reservas_regulares=monto_neto_reservas_regulares, descuento_feriados=descuento_feriados,
+        descuento_vacaciones=descuento_vacaciones, descuento_licencias=descuento_licencias,
+        aisladas_en_liquidaciones=aisladas_en_liquidaciones, feriados_trabajados=feriados_trabajados,
+        cargos_especiales=cargos_especiales, cuotas_planes_pago=cuotas_planes_pago,
+        otros_ajustes=otros_ajustes, cobrado_r=cobrado_r,
     )
 
 
 @dataclass
 class EstadisticasPrincipales:
-    monto_regulares: float
-    monto_aisladas: float
-    total_ingresos: float
-    total_liquidado: float
-    saldo_pendiente: float
-    gastos_operativos: float
-    balance_negocio: float
+    """Las tres secciones del cuadrito "Estadísticas principales mes en
+    curso" (rediseño completo, pedido explícito de la clienta): las
+    propiedades de acá abajo son justamente las líneas "=" de cada
+    sección ("Total liquidado mes en curso", "Balance del negocio",
+    "Monto restante del mes a cobrar"), para que la pantalla no tenga
+    que rearmar ninguna cuenta por su cuenta."""
     desglose_liquidaciones: DesgloseLiquidaciones
+    desglose_fuera_liquidacion: DesgloseFueraDeLiquidacion
+    gastos_operativos: float
+
+    @property
+    def total_liquidado(self) -> float:
+        return self.desglose_liquidaciones.total
+
+    @property
+    def monto_a_cobrar_base(self) -> float:
+        """"Monto liquidado más horas aisladas": lo liquidado más TODO lo
+        que generan los profesionales A por fuera de cualquier
+        liquidación (aisladas, extraordinarias, llaves/cargos)."""
+        return self.total_liquidado + self.desglose_fuera_liquidacion.bruto
+
+    @property
+    def balance_negocio(self) -> float:
+        return self.monto_a_cobrar_base - self.gastos_operativos
+
+    @property
+    def monto_cobrado(self) -> float:
+        return self.desglose_liquidaciones.cobrado_r + self.desglose_fuera_liquidacion.cobrado
+
+    @property
+    def monto_restante_a_cobrar(self) -> float:
+        return self.monto_a_cobrar_base - self.monto_cobrado
 
 
 def calcular_estadisticas_principales(conn: sqlite3.Connection) -> EstadisticasPrincipales:
-    """Montos del mes en curso, todo el espacio (sin ningún alcance de
-    ubicación) — mismas fórmulas "monto real facturado" (neto de
-    descuentos/recargos) que ya usan Estadísticas y Balance del negocio,
-    reusadas tal cual en vez de reimplementarlas acá."""
+    """Mes en curso, todo el espacio (sin ningún alcance de ubicación —
+    pedido explícito de la clienta: una liquidación es por profesional,
+    no se puede partir prolijamente por ubicación)."""
     periodo = periodo_actual(conn)
-    anio, mes = parsear_periodo(periodo)
-    ingresos, gastos, balance = resultado_periodo(conn, periodo)
     return EstadisticasPrincipales(
-        monto_regulares=monto_neto_regular_periodo(conn, anio, mes),
-        monto_aisladas=monto_neto_aislada_periodo(conn, anio, mes),
-        total_ingresos=ingresos,
-        total_liquidado=_total_liquidado_periodo(conn, periodo),
-        saldo_pendiente=_saldo_pendiente_periodo(conn, periodo),
-        gastos_operativos=gastos,
-        balance_negocio=balance,
         desglose_liquidaciones=_desglose_liquidaciones_periodo(conn, periodo),
+        desglose_fuera_liquidacion=fuera_de_liquidacion_periodo(conn, periodo),
+        gastos_operativos=total_gastos_periodo(conn, periodo),
     )
 
 

@@ -540,49 +540,81 @@ def test_tarjeta_ocupacion_repite_los_tres_conceptos_por_unidad(qtbot, conn):
     assert texto.count("Ocupación regular general:") == 2  # general + la de esa unidad
 
 
-def test_tarjeta_estadisticas_principales_muestra_los_siete_conceptos(qtbot, conn):
+def _texto_estadisticas_principales(panel) -> str:
+    """Rediseño completo: "Estadísticas principales mes en curso" ya no
+    es un solo `QLabel` — son tres secciones (detalle + total en
+    negrita cada una) en una cadena de `QLabel` dentro del mismo
+    `QVBoxLayout`. Concatenarlas en el mismo orden en que se agregan al
+    layout reconstruye el texto completo, mismo criterio que antes para
+    los tests que solo necesitan buscar una etiqueta puntual."""
+    return "\n".join([
+        panel.etiqueta_detalle_liquidaciones.text(), panel.etiqueta_total_liquidado.text(),
+        panel.etiqueta_detalle_resultado.text(), panel.etiqueta_balance_negocio.text(),
+        panel.etiqueta_detalle_cobro.text(), panel.etiqueta_monto_restante_a_cobrar.text(),
+    ])
+
+
+def test_tarjeta_estadisticas_principales_muestra_las_lineas_de_las_tres_secciones(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    texto = pantalla.panel_avance.etiqueta_estadisticas_principales.text()
+    texto = _texto_estadisticas_principales(pantalla.panel_avance)
     for etiqueta in (
-        "Monto por reservas regulares:", "Monto por reservas aisladas:", "Total ingresos:",
-        "Total liquidado:", "Saldo pendiente de cobro (de lo liquidado):",
-        "Gastos operativos:", "Balance de negocio:",
+        "Monto neto reservas regulares:", "Descuentos por feriados no trabajados:",
+        "Descuentos por vacaciones:", "Descuentos por licencias:", "Reservas aisladas:",
+        "Feriados trabajados:", "Cargos especiales:", "Cuotas de planes de pago:", "Otros ajustes:",
+        "Total liquidado mes en curso:",
+        "Horas aisladas por fuera de la liquidación:", "Reservas extraordinarias por fuera de la liquidación:",
+        "Otros conceptos por fuera de la liquidación:", "Gastos operativos:", "Balance del negocio:",
+        "Monto liquidado más horas aisladas:", "Monto cobrado hasta el momento:",
+        "Monto restante del mes a cobrar:",
     ):
         assert etiqueta in texto
 
 
-def test_tarjeta_estadisticas_principales_desglose_entre_liquidado_y_pendiente(qtbot, conn):
-    """Pedido explícito de la clienta: las cuatro líneas de desglose
-    (feriados/vacaciones/aisladas/cuotas) quedan entre "Total liquidado"
-    y "Saldo pendiente de cobro", para explicar de un vistazo por qué
-    difieren los dos totales de arriba."""
+def test_tarjeta_estadisticas_principales_tres_subtitulos_en_itálica_y_en_orden(qtbot, conn):
+    """Pedido explícito de la clienta: tres subtítulos en itálica
+    ("Liquidaciones mes en curso" / "Resultado del negocio" / "Monto a
+    cobrar en el mes en curso"), en ese orden."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    texto = pantalla.panel_avance.etiqueta_estadisticas_principales.text()
-    orden_esperado = [
-        "Total liquidado:", "Descuento por feriados:", "Descuento por vacaciones y licencias:",
-        "Reservas aisladas en liquidaciones:", "Cuotas de planes de pago en liquidaciones:",
-        "Saldo pendiente de cobro (de lo liquidado):",
+    tarjeta = _tarjeta_de(pantalla.panel_avance.etiqueta_total_liquidado)
+    subtitulos = [
+        e for e in tarjeta.findChildren(QLabel)
+        if e.styleSheet() == "font-style: italic;"
     ]
-    posiciones = [texto.index(etiqueta) for etiqueta in orden_esperado]
+    assert [e.text() for e in subtitulos] == [
+        "Liquidaciones mes en curso", "Resultado del negocio", "Monto a cobrar en el mes en curso",
+    ]
+
+
+def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, conn):
+    """Cada sección (detalle + total en negrita) tiene que quedar antes
+    que la siguiente, en el mismo `QVBoxLayout` — "Liquidaciones mes en
+    curso" primero, después "Resultado del negocio", después "Monto a
+    cobrar en el mes en curso"."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_avance
+    contenido = panel.etiqueta_total_liquidado.parentWidget()
+    layout = contenido.layout()
+    orden = [layout.itemAt(i).widget() for i in range(layout.count())]
+    indice = {id(w): i for i, w in enumerate(orden) if w is not None}
+    posiciones = [
+        indice[id(panel.etiqueta_detalle_liquidaciones)], indice[id(panel.etiqueta_total_liquidado)],
+        indice[id(panel.etiqueta_detalle_resultado)], indice[id(panel.etiqueta_balance_negocio)],
+        indice[id(panel.etiqueta_detalle_cobro)], indice[id(panel.etiqueta_monto_restante_a_cobrar)],
+    ]
     assert posiciones == sorted(posiciones)
 
 
-def test_tarjeta_estadisticas_principales_reordena_gastos_y_balance_antes_de_liquidado(qtbot, conn):
-    """Pedido explícito de la clienta: "Gastos operativos"/"Balance de
-    negocio" pasan a estar inmediatamente después de "Total ingresos";
-    "Total liquidado"/"Saldo pendiente de cobro (de lo liquidado)"
-    quedan al final."""
+def test_tarjeta_estadisticas_principales_los_tres_totales_van_en_negrita(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    texto = pantalla.panel_avance.etiqueta_estadisticas_principales.text()
-    orden_esperado = [
-        "Total ingresos:", "Gastos operativos:", "Balance de negocio:",
-        "Total liquidado:", "Saldo pendiente de cobro (de lo liquidado):",
-    ]
-    posiciones = [texto.index(etiqueta) for etiqueta in orden_esperado]
-    assert posiciones == sorted(posiciones)
+    panel = pantalla.panel_avance
+    for etiqueta in (
+        panel.etiqueta_total_liquidado, panel.etiqueta_balance_negocio, panel.etiqueta_monto_restante_a_cobrar,
+    ):
+        assert "font-weight: bold;" in etiqueta.styleSheet()
 
 
 def test_tarjeta_profesionales_muestra_los_cuatro_conceptos_nuevos(qtbot, conn):
@@ -678,17 +710,6 @@ def test_tarjeta_control_pagos_sin_vencimientos_proximos_no_resalta(qtbot, conn)
     assert "Con vencimiento hoy: 0" in texto
 
 
-def test_tarjetas_vacias_no_tienen_contenido_asignado(qtbot, conn):
-    """Pedido explícito de la clienta: dos cuadritos nuevos quedan sin
-    asignar por el momento — solo el título."""
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    for tarjeta in (pantalla.panel_avance.tarjeta_vacia_1, pantalla.panel_avance.tarjeta_vacia_2):
-        etiquetas = tarjeta.findChildren(QLabel)
-        assert len(etiquetas) == 1  # solo el encabezado del título
-        assert etiquetas[0].text() == "(Sin asignar):"
-
-
 def test_cada_cuadrito_principal_tiene_su_propio_scroll_area(qtbot, conn):
     """Punto 78: cada uno de los seis cuadritos (período, backup,
     ocupación, profesionales, fechas especiales, cumpleaños) tiene que
@@ -713,42 +734,60 @@ def test_tarjeta_periodo_muestra_periodo_y_reloj_en_el_mismo_cuadrito(qtbot, con
     assert _tarjeta_de(pantalla.panel_avance.etiqueta_periodo) is _tarjeta_de(pantalla.panel_avance.etiqueta_reloj)
 
 
-def _nueve_tarjetas(panel) -> list:
+def _seis_tarjetas_chicas(panel) -> list:
     return [
         _tarjeta_de(panel.etiqueta_periodo),
-        _tarjeta_de(panel.etiqueta_estadisticas_principales),
-        _tarjeta_de(panel.etiqueta_ocupacion),
         _tarjeta_de(panel.etiqueta_profesionales),
+        _tarjeta_de(panel.etiqueta_control_pagos),
+        _tarjeta_de(panel.etiqueta_ocupacion),
         _tarjeta_de(panel.etiqueta_fechas_especiales),
         _tarjeta_de(panel.etiqueta_cumpleanos),
-        _tarjeta_de(panel.etiqueta_control_pagos),
-        panel.tarjeta_vacia_1,
-        panel.tarjeta_vacia_2,
     ]
 
 
-def test_hay_nueve_tarjetas_parejas_en_tres_filas(qtbot, conn):
-    """Pedido explícito de la clienta: se saca la sección de Alertas (ver
-    docs/historial para el detalle de las rondas anteriores, que vivía
-    en una tarjeta aparte de ancho completo) y en su lugar se suman tres
-    cuadritos más, del mismo ancho/alto que los otros seis — la grilla
-    pasa de 2 filas de 3 a 3 filas de 3 (9 en total)."""
+def test_seis_tarjetas_chicas_y_la_tarjeta_larga_quedan_del_mismo_ancho(qtbot, conn):
+    """Rediseño completo (pedido explícito de la clienta): dos columnas
+    de tres cuadritos chicos cada una (columna 1: Período actual y
+    último backup / Profesionales / Control de pagos; columna 2:
+    Ocupación y horas / Feriados y fechas especiales / Cumpleaños y
+    días de profesión), y una tercer columna de un solo cuadro LARGO
+    ("Estadísticas principales mes en curso") — las tres "columnas"
+    quedan del mismo ancho."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 800)
     pantalla.show()
     qtbot.waitExposed(pantalla)
 
-    tarjetas = _nueve_tarjetas(pantalla.panel_avance)
-    assert all(t is not None for t in tarjetas)
+    chicas = _seis_tarjetas_chicas(pantalla.panel_avance)
+    larga = _tarjeta_de(pantalla.panel_avance.etiqueta_total_liquidado)
+    assert all(t is not None for t in chicas)
+    assert larga is not None
 
-    # Tolerancia chica: el reparto de una división no exacta (ancho/alto
-    # de ventana entre columnas/filas) cae en algún borde — invisible a
-    # simple vista pero real en píxeles.
-    anchos = [t.width() for t in tarjetas]
-    altos = [t.height() for t in tarjetas]
-    assert max(anchos) - min(anchos) <= 8  # las nueve del mismo ancho
-    assert max(altos) - min(altos) <= 8  # las nueve del mismo alto
+    # Tolerancia chica: el reparto de una división no exacta (ancho de
+    # ventana entre las tres "columnas") cae en algún borde — invisible
+    # a simple vista pero real en píxeles.
+    anchos = [t.width() for t in chicas] + [larga.width()]
+    assert max(anchos) - min(anchos) <= 8
+
+
+def test_tarjeta_larga_queda_del_alto_de_sus_tres_hermanas_chicas(qtbot, conn):
+    """La tarjeta larga ("Estadísticas principales mes en curso") es
+    hermana de las dos columnas de tres cuadritos chicos, las tres con
+    `stretch=1` — queda del alto de una columna entera (sus tres
+    cuadritos chicos juntos), no del alto de un solo cuadrito."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.resize(1200, 900)
+    pantalla.show()
+    qtbot.waitExposed(pantalla)
+
+    chicas = _seis_tarjetas_chicas(pantalla.panel_avance)
+    larga = _tarjeta_de(pantalla.panel_avance.etiqueta_total_liquidado)
+    alto_columna = sum(t.height() for t in chicas[:3])
+    # Tolerancia un poco más amplia: suma de tres alturas + el espaciado
+    # entre ellas (QVBoxLayout por default), redondeo de píxeles incluido.
+    assert abs(larga.height() - alto_columna) <= 20
 
 
 def test_titulos_de_las_tarjetas_van_en_negrita_e_italica_con_dos_puntos(qtbot, conn):
@@ -778,12 +817,16 @@ def test_el_borde_del_cuadrito_no_se_cuela_al_titulo_ni_al_contenido(qtbot, conn
 
 
 def test_hay_una_linea_divisoria_entre_los_dos_botones(qtbot, conn):
+    """La tarjeta "Estadísticas principales mes en curso" (rediseño
+    completo) suma sus propias líneas divisorias (una por sección) —
+    hay que acotar la búsqueda a las que son hijas DIRECTAS del panel
+    (la de los botones), no cualquier `QFrame` HLine del árbol entero."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel_izquierda = pantalla.panel_avance.boton_backup.parentWidget()
     lineas = [
         w for w in panel_izquierda.findChildren(QFrame)
-        if w.frameShape() == QFrame.Shape.HLine
+        if w.frameShape() == QFrame.Shape.HLine and w.parentWidget() is pantalla.panel_avance
     ]
     assert len(lineas) == 1
 
@@ -932,7 +975,7 @@ def test_scroll_de_cada_cuadrito_principal_tiene_fondo_transparente(qtbot, conn)
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     for etiqueta in (
-        pantalla.panel_avance.etiqueta_periodo, pantalla.panel_avance.etiqueta_estadisticas_principales,
+        pantalla.panel_avance.etiqueta_periodo, pantalla.panel_avance.etiqueta_total_liquidado,
         pantalla.panel_avance.etiqueta_ocupacion, pantalla.panel_avance.etiqueta_profesionales,
         pantalla.panel_avance.etiqueta_fechas_especiales, pantalla.panel_avance.etiqueta_cumpleanos,
         pantalla.panel_avance.etiqueta_control_pagos,
@@ -945,11 +988,14 @@ def test_scroll_de_cada_cuadrito_principal_tiene_fondo_transparente(qtbot, conn)
 def test_contenido_de_un_solo_label_se_alinea_arriba_no_al_centro(qtbot, conn):
     """Sin `setAlignment(AlignTop)`, `setWidgetResizable(True)` estira el
     `QLabel` al alto del viewport y la alineación vertical default
-    (`AlignVCenter`) lo deja centrado en vez de arriba."""
+    (`AlignVCenter`) lo deja centrado en vez de arriba. "Estadísticas
+    principales mes en curso" ya no es un solo `QLabel` (es un `QWidget`
+    con su propio layout que ya empuja todo arriba con `addStretch()`,
+    mismo caso que "Período actual y último backup") — no aplica acá."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     for etiqueta in (
-        pantalla.panel_avance.etiqueta_estadisticas_principales, pantalla.panel_avance.etiqueta_ocupacion,
+        pantalla.panel_avance.etiqueta_ocupacion,
         pantalla.panel_avance.etiqueta_profesionales, pantalla.panel_avance.etiqueta_fechas_especiales,
         pantalla.panel_avance.etiqueta_cumpleanos, pantalla.panel_avance.etiqueta_control_pagos,
     ):
@@ -966,22 +1012,3 @@ def test_alto_minimo_de_tarjeta_bajo_a_dos_tercios(qtbot, conn):
     assert _ALTO_MINIMO_TARJETA == 93  # round(140 * 2 / 3)
 
 
-def test_fila1_fila2_y_fila3_quedan_del_mismo_alto(qtbot, conn):
-    """Punto 82 (SistemaDF v0.11.2026.10): todo el alto que queda debajo
-    de "Avanzar de mes" se reparte en franjas IGUALES — cada fila de
-    tres cuadritos es hermana de `layout_solapa` con el mismo
-    `stretch=1`. Pedido explícito de la clienta (ronda posterior):
-    la tercera franja, que antes era la tarjeta de Alertas de ancho
-    completo, ahora es una fila de tres cuadritos más (Control de
-    pagos + dos sin asignar), del mismo criterio que las otras dos."""
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.resize(1200, 900)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-    alto_fila1 = _tarjeta_de(pantalla.panel_avance.etiqueta_periodo).height()
-    alto_fila2 = _tarjeta_de(pantalla.panel_avance.etiqueta_profesionales).height()
-    alto_fila3 = _tarjeta_de(pantalla.panel_avance.etiqueta_control_pagos).height()
-    # Tolerancia chica: redondeo de QBoxLayout al repartir píxeles entre
-    # tres ítems, invisible a simple vista.
-    assert max(alto_fila1, alto_fila2, alto_fila3) - min(alto_fila1, alto_fila2, alto_fila3) <= 8

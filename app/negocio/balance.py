@@ -64,57 +64,159 @@ una liquidación."""
 from __future__ import annotations
 
 import sqlite3
+from dataclasses import dataclass
 
 from app.negocio.dias import parsear_periodo
-from app.negocio.estadisticas import (
-    _ids_consultorio_del_alcance,
-    monto_neto_aislada_periodo,
-    monto_neto_regular_periodo,
-)
-from app.negocio.liquidaciones import (
-    CATEGORIAS_CON_LIQUIDACION_MENSUAL,
-    _calcular_feriados_trabajados,
-    ids_consolidados,
-)
+from app.negocio.estadisticas import _ids_consultorio_del_alcance
 from app.repositorio.registro import obtener_repositorio
 
 
-def ingresos_feriados_trabajados_periodo(
-    conn: sqlite3.Connection, periodo: str, ids_consultorio: list[int] | None = None,
-) -> float:
-    """Monto de "feriado trabajado" que efectivamente cae en una
-    liquidación de `periodo` (ver el docstring del módulo) — recorre
-    todos los profesionales R del sistema, reusando la misma resolución
-    de período que ya usa el cálculo de liquidación."""
-    if ids_consultorio is not None and not ids_consultorio:
-        return 0.0
+def monto_liquidado_periodo(conn: sqlite3.Connection, periodo: str) -> float:
+    """Suma `MontoGenerado` de la ÚLTIMA emisión de cada profesional para
+    este período (nunca de todas sus filas — `emitir_liquidacion` crea
+    una fila NUEVA en cada reemisión, cada una con el monto TOTAL de esa
+    emisión, no un delta). Valor FROZEN (lo que de verdad se facturó,
+    con los valores vigentes en el momento de emitir cada liquidación),
+    a diferencia del desglose en vivo de `app.negocio.panel_control.
+    DesgloseLiquidaciones` (que recalcula con los valores de HOY) —
+    "Ingresos" muestra históricos de cualquier período, así que necesita
+    el valor real que se facturó entonces, no una reconstrucción con
+    tarifas de hoy.
+
+    Sin alcance de ubicación: pedido explícito de la clienta — una
+    liquidación es por PROFESIONAL, no se puede partir prolijamente por
+    Consultorio (los descuentos de feriados/vacaciones no son por
+    ubicación) — así que "Monto total liquidado" en Ingresos/Resultado
+    ya no filtra por Localidad/Edificio/Unidad/Consultorio, siempre
+    refleja el total real de todo el espacio."""
+    return conn.execute(
+        """
+        SELECT COALESCE(SUM(MontoGenerado), 0) AS total FROM LiquidacionEmitida
+        WHERE Periodo = ? AND IdLiquidacion IN (
+            SELECT MAX(IdLiquidacion) FROM LiquidacionEmitida WHERE Periodo = ? GROUP BY IdProfesional
+        )
+        """,
+        (periodo, periodo),
+    ).fetchone()["total"]
+
+
+@dataclass
+class DesgloseFueraDeLiquidacion:
+    """Profesionales categoría A: nunca tienen liquidación mensual propia
+    (`app.negocio.liquidaciones.CATEGORIAS_CON_LIQUIDACION_MENSUAL`), así
+    que todo lo que generan en el período queda "por fuera" de cualquier
+    liquidación — pedido explícito de la clienta, desglosado en tres
+    conceptos (antes de esta ronda "Ingresos" solo miraba el bruto de
+    sus aisladas, sin separar extraordinarias ni llaves/cargos
+    especiales, y sin distinguir que un A nunca entra en una
+    liquidación). `cobrado` ya viene acotado por profesional (nunca
+    cuenta el excedente de uno que pagó de más — mismo criterio que
+    `app.negocio.panel_control.DesgloseLiquidaciones`)."""
+    aisladas_normales: float
+    reservas_extraordinarias: float
+    otros_conceptos: float
+    cobrado: float
+
+    @property
+    def bruto(self) -> float:
+        return self.aisladas_normales + self.reservas_extraordinarias + self.otros_conceptos
+
+
+def fuera_de_liquidacion_periodo(conn: sqlite3.Connection, periodo: str) -> DesgloseFueraDeLiquidacion:
+    """Recorre cada profesional categoría A y arma, para `periodo`
+    (AAAA-MM, por `Fecha` real de cada movimiento — a diferencia de
+    `DesgloseLiquidaciones`, acá no hay liquidación de la que depender,
+    así que el parámetro que manda es la fecha real del mes, no si algo
+    "entra" en una emisión):
+
+    - `aisladas_normales`: horas aisladas comunes (hora × tarifa
+      congelada al tomarla, + recargo si aplica) — mismo criterio que
+      `app.negocio.mensajes.movimiento_periodo_aislada`, separado en vez
+      de sumado junto con extraordinarias/llaves/cargos.
+    - `reservas_extraordinarias`: el monto a mano (`MontoExtraordinario`)
+      de las reservas aisladas marcadas `EsExtraordinaria`.
+    - `otros_conceptos`: depósitos/reintegros de llaves + ítems libres
+      (`CargoEspecial` sin `IdLlave`, para no contarlos dos veces).
+    - `cobrado`: lo efectivamente pagado este período por cada A,
+      acotado a no superar lo que esa persona generó (mismo criterio de
+      tope por profesional que ya usa `DesgloseLiquidaciones`/
+      `_saldo_pendiente_periodo` para R)."""
+    anio, mes = parsear_periodo(periodo)
+    prefijo_mes = f"{anio:04d}-{mes:02d}-"
     cfg = conn.execute("SELECT RecargoPorcentajeAisladas FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
     recargo_pct = cfg["RecargoPorcentajeAisladas"] if cfg else 0.0
-    total = 0.0
-    for profesional in obtener_repositorio(conn, "Profesional").listar():
-        if profesional["CategoriaProfesional"] not in CATEGORIAS_CON_LIQUIDACION_MENSUAL:
-            continue
-        ids = ids_consolidados(conn, profesional["IdProfesional"])
-        mes_anterior, mes_en_curso = _calcular_feriados_trabajados(
-            conn, ids, profesional["IdProfesional"], periodo, False, recargo_pct,
+
+    aisladas_normales = 0.0
+    reservas_extraordinarias = 0.0
+    otros_conceptos = 0.0
+    cobrado = 0.0
+    for profesional in obtener_repositorio(conn, "Profesional").listar(CategoriaProfesional="A"):
+        id_profesional = profesional["IdProfesional"]
+        filas = conn.execute(
+            """
+            SELECT ra.HoraInicio, ra.HoraFin, ra.AplicaRecargo, ra.EsReubicacion, ra.EsExtraordinaria,
+                   ra.MontoExtraordinario, COALESCE(ra.ValorHoraAlMomentoDeLaReserva, c.ValorHoraAisladaActual)
+                       AS ValorHoraAislada
+            FROM ReservaAislada ra JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
+            WHERE ra.IdProfesional = ? AND ra.Estado = 'Confirmada' AND ra.Fecha LIKE ?
+            """,
+            (id_profesional, prefijo_mes + "%"),
+        ).fetchall()
+        normales_prof = 0.0
+        extraordinarias_prof = 0.0
+        for f in filas:
+            if f["EsExtraordinaria"]:
+                extraordinarias_prof += f["MontoExtraordinario"] or 0.0
+            elif not f["EsReubicacion"]:
+                monto = (f["HoraFin"] - f["HoraInicio"]) * f["ValorHoraAislada"]
+                normales_prof += monto * (1 + recargo_pct / 100) if f["AplicaRecargo"] else monto
+
+        llaves = conn.execute(
+            "SELECT Tipo, DepositoCobrado, MontoCobrado, DepositoReintegrado, MontoReintegrado "
+            "FROM LlaveMovimiento WHERE IdProfesional = ? AND Tipo IN ('Asignación', 'Devolución') AND Fecha LIKE ?",
+            (id_profesional, prefijo_mes + "%"),
+        ).fetchall()
+        otros_prof = 0.0
+        for ll in llaves:
+            if ll["Tipo"] == "Asignación" and ll["DepositoCobrado"]:
+                otros_prof += ll["MontoCobrado"] or 0.0
+            if ll["Tipo"] == "Devolución" and ll["DepositoReintegrado"]:
+                otros_prof -= ll["MontoReintegrado"] or 0.0
+        otros_prof += sum(
+            c["Monto"] for c in obtener_repositorio(conn, "CargoEspecial").listar(
+                IdProfesional=id_profesional, PeriodoImputado=periodo,
+            )
+            if c["IdLlave"] is None
         )
-        for item in (*mes_anterior, *mes_en_curso):
-            if ids_consultorio is None or item.id_consultorio in ids_consultorio:
-                total += item.monto
-    return total
+
+        bruto_prof = normales_prof + extraordinarias_prof + otros_prof
+        pagado_prof = conn.execute(
+            "SELECT COALESCE(SUM(Monto), 0) AS total FROM HistorialPagos WHERE IdProfesional = ? AND PeriodoImputado = ?",
+            (id_profesional, periodo),
+        ).fetchone()["total"]
+        pendiente_prof = max(bruto_prof + pagado_prof, 0)
+        cobrado += max(bruto_prof - pendiente_prof, 0)
+
+        aisladas_normales += normales_prof
+        reservas_extraordinarias += extraordinarias_prof
+        otros_conceptos += otros_prof
+
+    return DesgloseFueraDeLiquidacion(
+        aisladas_normales=aisladas_normales, reservas_extraordinarias=reservas_extraordinarias,
+        otros_conceptos=otros_conceptos, cobrado=cobrado,
+    )
 
 
 def total_ingresos_periodo(
     conn: sqlite3.Connection, periodo: str, ids_consultorio: list[int] | None = None,
-) -> tuple[float, float, float]:
-    """(regulares, aisladas, feriados trabajados) netos del período,
-    para el alcance de `ids_consultorio` (`None` = todo el sistema)."""
-    anio, mes = parsear_periodo(periodo)
-    return (
-        monto_neto_regular_periodo(conn, anio, mes, ids_consultorio),
-        monto_neto_aislada_periodo(conn, anio, mes, ids_consultorio),
-        ingresos_feriados_trabajados_periodo(conn, periodo, ids_consultorio),
-    )
+) -> tuple[float, float]:
+    """(monto liquidado, ingresos por fuera de las liquidaciones) del
+    período. `ids_consultorio` queda SIN USAR (ver `monto_liquidado_
+    periodo`: pedido explícito de la clienta, una liquidación no se
+    puede partir por ubicación) — se sigue aceptando el parámetro por
+    compatibilidad con `resultado_periodo`, que sigue filtrando Gastos
+    operativos por ubicación."""
+    return monto_liquidado_periodo(conn, periodo), fuera_de_liquidacion_periodo(conn, periodo).bruto
 
 
 def _consultorios_de_unidad(conn: sqlite3.Connection, id_unidad: int) -> list[int]:
@@ -241,8 +343,8 @@ def resultado_periodo(
     ids_consultorio = _ids_consultorio_del_alcance(
         conn, id_localidad=id_localidad, id_edificio=id_edificio, id_unidad=id_unidad, id_consultorio=id_consultorio,
     )
-    regulares, aisladas, feriados_trabajados = total_ingresos_periodo(conn, periodo, ids_consultorio)
-    ingresos = regulares + aisladas + feriados_trabajados
+    liquidado, fuera_de_liquidacion = total_ingresos_periodo(conn, periodo, ids_consultorio)
+    ingresos = liquidado + fuera_de_liquidacion
     gastos = total_gastos_periodo(
         conn, periodo, id_localidad=id_localidad, id_edificio=id_edificio,
         id_unidad=id_unidad, id_consultorio=id_consultorio,

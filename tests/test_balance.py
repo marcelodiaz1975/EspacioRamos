@@ -3,7 +3,8 @@ import pytest
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.balance import (
-    ingresos_feriados_trabajados_periodo,
+    fuera_de_liquidacion_periodo,
+    monto_liquidado_periodo,
     resultado_periodo,
     total_gastos_periodo,
     total_ingresos_periodo,
@@ -14,7 +15,6 @@ from app.repositorio.registro import obtener_repositorio
 VALOR_HORA_REGULAR = 1000
 VALOR_HORA_AISLADA = 500
 PERIODO = "2026-08"
-PERIODO_ANTERIOR = "2026-07"
 
 
 @pytest.fixture
@@ -44,47 +44,80 @@ def _profesional_con_reserva_lunes(conn, consultorio, horas=2):
     return id_prof
 
 
-def test_total_ingresos_periodo_suma_regulares_aisladas_y_feriados_trabajados(conn, consultorio):
+def test_total_ingresos_periodo_combina_monto_liquidado_y_fuera_de_liquidacion(conn, consultorio):
+    """Rediseño completo (pedido explícito de la clienta): "Monto total
+    liquidado" ya no se recalcula en vivo desde las reservas (eso vivía
+    en `monto_neto_regular_periodo`, de baja en este camino) — es el
+    `MontoGenerado` FROZEN de la última emisión de cada profesional
+    (`monto_liquidado_periodo`). "Ingresos por fuera de las
+    liquidaciones" es lo que generan los profesionales categoría A
+    (`fuera_de_liquidacion_periodo`), nunca lo que factura un R fuera de
+    la grilla regular — eso ya está dentro de su propia liquidación."""
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    obtener_repositorio(conn, "FeriadoTrabajado").crear(
-        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-17",
-        HoraInicio=9, HoraFin=11, AplicaRecargo=0, FechaCarga="2026-08-01",
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-20")
+    id_prof_a = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislado")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof_a, IdConsultorio=consultorio, Fecha="2026-08-10", HoraInicio=9, HoraFin=11,
     )
-    regulares, aisladas, feriados = total_ingresos_periodo(conn, PERIODO)
-    assert regulares == pytest.approx(10000.0)  # 5 lunes de agosto 2026 x 2hs x 1000
-    assert aisladas == 0.0
-    assert feriados == pytest.approx(2000.0)  # 2hs x 1000, sin descuento ni recargo
+    liquidado, fuera = total_ingresos_periodo(conn, PERIODO)
+    assert liquidado == pytest.approx(monto_liquidado_periodo(conn, PERIODO))
+    assert liquidado == pytest.approx(10000.0)  # 5 lunes de agosto 2026 x 2hs x 1000, liquidación emitida
+    assert fuera == pytest.approx(2 * VALOR_HORA_AISLADA)  # 2hs x 500, profesional A, sin liquidación propia
 
 
-def test_ingresos_feriados_trabajados_avisado_despues_de_emitir_se_traslada_al_periodo_siguiente(conn, consultorio):
-    """Mismo criterio que `_calcular_feriados_trabajados`: si se avisa
-    después de emitida la liquidación del mes del feriado, el cargo
-    entra en la liquidación del mes siguiente — confirmado por la
-    clienta: "quiero que se contemple dentro de los ingresos en el
-    período en el cual se carga en la liquidación, no importa la fecha
-    del feriado"."""
+def test_total_ingresos_periodo_no_filtra_por_ubicacion(conn, consultorio):
+    """Pedido explícito de la clienta (recomendación elegida): una
+    liquidación es por profesional, no se puede partir prolijamente por
+    ubicación — `ids_consultorio` queda sin usar para "Monto total
+    liquidado"/"Ingresos por fuera de las liquidaciones" (a diferencia
+    de Gastos operativos, que sigue prorrateando por ubicación, ver
+    `test_total_gastos_periodo_*`)."""
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO_ANTERIOR, fecha_emision="2026-07-05")
-    obtener_repositorio(conn, "FeriadoTrabajado").crear(
-        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-07-09",
-        HoraInicio=9, HoraFin=11, AplicaRecargo=0, FechaCarga="2026-07-20",  # avisó después de emitida julio
-    )
-    assert ingresos_feriados_trabajados_periodo(conn, PERIODO_ANTERIOR) == 0.0
-    assert ingresos_feriados_trabajados_periodo(conn, PERIODO) == pytest.approx(2000.0)
-
-
-def test_ingresos_filtra_por_consultorio(conn, consultorio):
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-20")
     otro_consultorio = obtener_repositorio(conn, "Consultorio").crear(
         IdUnidad=obtener_repositorio(conn, "Unidad").crear(
             IdEdificio=obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 2"), Departamento="1",
         ),
         NumeroConsultorio=1, ValorHoraRegularActual=VALOR_HORA_REGULAR, ValorHoraAisladaActual=VALOR_HORA_AISLADA,
     )
-    _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    regulares, _, _ = total_ingresos_periodo(conn, PERIODO, ids_consultorio=[otro_consultorio])
-    assert regulares == 0.0
-    regulares, _, _ = total_ingresos_periodo(conn, PERIODO, ids_consultorio=[consultorio])
-    assert regulares == pytest.approx(10000.0)
+    sin_filtro = total_ingresos_periodo(conn, PERIODO)
+    con_otro_consultorio = total_ingresos_periodo(conn, PERIODO, ids_consultorio=[otro_consultorio])
+    assert sin_filtro == con_otro_consultorio == (pytest.approx(10000.0), 0.0)
+
+
+def test_fuera_de_liquidacion_periodo_desglosa_tres_conceptos_y_acota_el_cobrado(conn, consultorio):
+    """Profesionales categoría A nunca tienen liquidación propia — todo
+    lo que generan en el período queda desglosado en tres conceptos
+    separados (pedido explícito de la clienta, tras la pregunta de qué
+    incluye cada línea de "Resultado del negocio" en Panel de control):
+    aisladas comunes, reservas extraordinarias, y "otros conceptos"
+    (llaves + cargos especiales sueltos). `cobrado` queda acotado a no
+    superar lo generado por ESE profesional (mismo criterio de tope que
+    ya usa `DesgloseLiquidaciones` para los R)."""
+    id_prof_a = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="A", Apellido="Aislado")
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof_a, IdConsultorio=consultorio, Fecha="2026-08-05", HoraInicio=9, HoraFin=11,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof_a, IdConsultorio=consultorio, Fecha="2026-08-12", HoraInicio=9, HoraFin=10,
+        EsExtraordinaria=1, MontoExtraordinario=3000,
+    )
+    id_llave = obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=5000)
+    obtener_repositorio(conn, "LlaveMovimiento").crear(
+        IdLlave=id_llave, Tipo="Asignación", IdProfesional=id_prof_a, Fecha="2026-08-02",
+        DepositoCobrado=1, MontoCobrado=5000,
+    )
+    # Pago NEGATIVO (reduce lo que debe, ver app.negocio.pagos.registrar_pago):
+    # cobra de más y el excedente no puede superar lo generado (1000+3000+5000=9000).
+    obtener_repositorio(conn, "HistorialPagos").crear(
+        IdProfesional=id_prof_a, Monto=-9500, PeriodoImputado=PERIODO,
+    )
+    fuera = fuera_de_liquidacion_periodo(conn, PERIODO)
+    assert fuera.aisladas_normales == pytest.approx(2 * VALOR_HORA_AISLADA)
+    assert fuera.reservas_extraordinarias == pytest.approx(3000.0)
+    assert fuera.otros_conceptos == pytest.approx(5000.0)
+    assert fuera.bruto == pytest.approx(9000.0)
+    assert fuera.cobrado == pytest.approx(9000.0)  # acotado, no los 9500 pagados
 
 
 def test_total_gastos_periodo_incluye_generales_sin_filtro(conn):
@@ -213,7 +246,8 @@ def test_total_gastos_periodo_rama_sin_hijos_no_reparte_nada(conn):
 
 
 def test_resultado_periodo_es_ingresos_menos_gastos(conn, consultorio):
-    _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-20")
     obtener_repositorio(conn, "GastoOperativo").crear(
         Periodo=PERIODO, Categoria="Alquiler", Monto=3000, Alcance="Espacio general",
     )
@@ -223,13 +257,14 @@ def test_resultado_periodo_es_ingresos_menos_gastos(conn, consultorio):
     assert resultado == pytest.approx(7000.0)
 
 
-def test_resultado_periodo_con_filtro_puntual_prorratea_los_gastos_generales(conn, consultorio):
-    """A diferencia del criterio viejo (excluir "Espacio general" de
-    cualquier filtro puntual), ahora le llega la porción prorateada que
-    le corresponde en la cascada — acá el consultorio de la fixture es
-    el único del sistema, así que se queda con el gasto general entero."""
+def test_resultado_periodo_con_filtro_puntual_ingresos_no_cambian_pero_gastos_si(conn, consultorio):
+    """Los ingresos (liquidado + fuera de liquidación) ya no filtran por
+    ubicación (pedido explícito de la clienta) — solo Gastos operativos
+    sigue prorrateando por el alcance elegido (acá el consultorio de la
+    fixture es el único del sistema, así que se queda con el gasto
+    general entero)."""
     id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
-    assert id_prof
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO, fecha_emision="2026-08-20")
     obtener_repositorio(conn, "GastoOperativo").crear(
         Periodo=PERIODO, Categoria="Alquiler", Monto=3000, Alcance="Espacio general",
     )
