@@ -549,3 +549,46 @@ columna Cuenta/Id, +20% de Importe, Deshacer habilitado/limpia, editar
 archivado reabre a Pendiente, selección tras crear/editar, etiquetas de
 conteo, foco a OK, parseo de "."). Suite completa: 23 + 40 tests,
 verificados sin regresiones.
+
+## Panel de control: se saca la sección "Alertas", se agrega el cuadro "Control de pagos"
+
+Pedido explícito de la clienta: eliminar por completo la sección
+"Alertas" de Panel de control, y sumar tres cuadritos más a la grilla
+(ahora 9, en 3 filas de 3, en vez de 6 + Alertas aparte). El cuadrito
+inferior izquierdo pasa a llamarse "Control de pagos" y replica las
+siete etiquetas de conteo de "Carga y control" (mismo `resumen_conteo_
+vencimientos`, sin los cuatro filtros que ahí sí se aplican, porque
+Panel de control muestra el total real) — "Con vencimiento hoy"/"Con
+vencimiento mañana" se resaltan en rojo y negrita cuando el conteo es
+mayor a cero, el resto de las líneas queda siempre en texto plano. Los
+otros dos cuadritos nuevos (inferior centro e inferior derecha) quedan
+sin asignar por ahora — consultado explícitamente con la clienta vía
+pregunta directa, eligió dejarlos vacíos (solo el título "(Sin
+asignar):") en vez de definir su contenido en esta ronda.
+
+Se eliminó de `app/negocio/panel_control.py` el dataclass `Alertas`,
+`calcular_alertas` y sus helpers exclusivos (`_reserva_regular_activa`,
+`_deuda_regulares_alerta`, `_planes_con_cuotas_vencidas`, `_fechas_
+especiales_proximas`, `_categoria_x_con_llaves_pendientes`) —
+confirmado por grep que ningún otro módulo los importa (otras pantallas
+con nombres parecidos, ej. `mensajeria.py`/`placas.py`, tienen sus
+propias funciones independientes). `_deuda_regulares`/`_deuda_aisladas`
+se mantuvieron: los sigue usando `calcular_estadisticas_profesionales`
+(el cuadrito "Profesionales", que no cambió). La grilla de tarjetas de
+`PanelAvanceMes._armar_ui` pasa de una estructura hardcodeada (2 filas +
+Alertas aparte) a un loop genérico sobre listas de 3 en 3, mismo
+`stretch=1` por fila para que todas midan igual de alto.
+
+Tests: eliminados 13 tests de alertas en `tests/test_panel_control.py`
+y 7 en `tests/test_gui_panel_control.py` (3 de alertas puntuales + 2 de
+ancho + 2 de scroll/estilo), renombrado/reescrito el test de "seis
+tarjetas parejas" a `test_nueve_tarjetas_parejas_en_tres_filas`, y
+sumados 4 tests nuevos: `test_tarjeta_control_pagos_muestra_los_siete_
+conteos`, `test_tarjeta_control_pagos_resalta_vencimiento_hoy_y_mañana_
+en_rojo_y_negrita`, `test_tarjeta_control_pagos_sin_vencimientos_
+proximos_no_resalta`, `test_tarjetas_vacias_no_tienen_contenido_
+asignado`. pyflakes limpio en los cuatro archivos tocados
+(`app/gui/pantallas/panel_control.py`, `app/negocio/panel_control.py`,
+`tests/test_panel_control.py`, `tests/test_gui_panel_control.py`);
+suite completa de los dos archivos de test: 94 passed.
+

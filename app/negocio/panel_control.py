@@ -3,17 +3,17 @@
 Encabezado (nombre del espacio, mes/año en curso, fecha de hoy) + botón
 "Avanzar de mes" (disponible en cualquier momento, no solo al principio o
 fin de mes — DC-06 §1: el operador puede necesitar adelantarlo unos días,
-por ejemplo por vacaciones propias) + 6 alertas (una nueva, `deuda_
-regulares_mes_anterior`, sumada en el repaso de DC-06 §3 — ver abajo).
-Este módulo calcula los datos; la pantalla en `app/gui` solo los muestra.
+por ejemplo por vacaciones propias). Este módulo calcula los datos; la
+pantalla en `app/gui` solo los muestra. La sección de alertas que vivía
+acá (`calcular_alertas`/`Alertas`) se sacó a pedido explícito de la
+clienta — ver el comentario grande más abajo, antes de `_deuda_aisladas`.
 """
 from __future__ import annotations
 
 import sqlite3
-from dataclasses import dataclass, field, fields
-from datetime import date, timedelta
+from dataclasses import dataclass
+from datetime import date
 
-from app.negocio.backup import backup_vencido as _backup_vencido
 from app.negocio.balance import resultado_periodo
 from app.negocio.dias import (
     fecha_actual,
@@ -34,28 +34,6 @@ from app.pdf.estilos import clave_orden_unidad
 from app.repositorio.registro import obtener_repositorio
 
 
-@dataclass
-class Alertas:
-    deuda_regulares: list[sqlite3.Row] = field(default_factory=list)
-    deuda_regulares_mes_anterior: list[sqlite3.Row] = field(default_factory=list)
-    deuda_aisladas: list[sqlite3.Row] = field(default_factory=list)
-    liquidaciones_regeneradas_no_enviadas: list[sqlite3.Row] = field(default_factory=list)
-    planes_con_cuotas_vencidas: list[sqlite3.Row] = field(default_factory=list)
-    fechas_especiales_proximas: list[sqlite3.Row] = field(default_factory=list)
-    categoria_x_con_llaves_pendientes: list[sqlite3.Row] = field(default_factory=list)
-    backup_vencido: bool = False
-
-    @property
-    def total(self) -> int:
-        """`backup_vencido` es un bool (una alerta binaria, no una lista de
-        registros como el resto) — cuenta como 1 cuando está prendida."""
-        total = 0
-        for f in fields(self):
-            valor = getattr(self, f.name)
-            total += len(valor) if isinstance(valor, list) else int(bool(valor))
-        return total
-
-
 def _deuda_regulares(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Todos los profesionales R con saldo (ANTERIOR, arrastrado de meses
     previos) fuera de tolerancia — alimenta el cuadrito "Profesionales" de
@@ -72,37 +50,6 @@ def _deuda_regulares(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ]
 
 
-def _reserva_regular_activa(conn: sqlite3.Connection, id_profesional: int, hoy: str) -> bool:
-    return conn.execute(
-        "SELECT 1 FROM ReservaRegular WHERE IdProfesional = ? AND VigenciaInicio <= ? "
-        "AND (VigenciaFin IS NULL OR VigenciaFin >= ?) LIMIT 1",
-        (id_profesional, hoy, hoy),
-    ).fetchone() is not None
-
-
-def _deuda_regulares_alerta(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    """Primer alerta del panel (pedido de la clienta, dos rondas de
-    ajuste sobre esta misma alerta). A diferencia de `_deuda_regulares`
-    (saldo ANTERIOR — arrastrado de meses previos —, que sigue
-    alimentando el cuadrito "Profesionales" sin cambios), esta alerta
-    puntual mira `SaldoCuentaActual`: lo que se va liquidando durante EL
-    MES EN CURSO (`avance_mes.avanzar_mes` lo resetea a 0 al arrancar un
-    mes nuevo; `liquidaciones.emitir_liquidacion` le suma lo generado;
-    `pagos.registrar_pago` le resta lo cobrado imputado a este período)
-    — no el saldo arrastrado de meses anteriores, aclarado explícitamente
-    por la clienta para esta sección. Además exige que el profesional
-    reserve regular a este momento, y queda ordenada por código."""
-    cfg = conn.execute("SELECT ToleranciaDeudaDescuento FROM Configuracion WHERE IdConfiguracion = 1").fetchone()
-    tolerancia = cfg["ToleranciaDeudaDescuento"] if cfg else 0.0
-    hoy = fecha_actual(conn).isoformat()
-    filas = [
-        p for p in obtener_repositorio(conn, "Profesional").listar(CategoriaProfesional="R")
-        if (p["SaldoCuentaActual"] or 0.0) > tolerancia and _reserva_regular_activa(conn, p["IdProfesional"], hoy)
-    ]
-    filas.sort(key=lambda p: p["IdCodigo"] or "")
-    return filas
-
-
 def _deuda_aisladas(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     """Las aisladas no tienen margen de tolerancia: cualquier saldo cuenta."""
     return [
@@ -111,56 +58,16 @@ def _deuda_aisladas(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     ]
 
 
-def _planes_con_cuotas_vencidas(conn: sqlite3.Connection, periodo: str) -> list[sqlite3.Row]:
-    filas = conn.execute(
-        """
-        SELECT DISTINCT pp.* FROM PlanPago pp JOIN CuotaPlan cp ON cp.IdPlan = pp.IdPlan
-        WHERE pp.Estado = 'Activo' AND cp.Estado = 'Pendiente' AND cp.PeriodoImputado < ?
-        """,
-        (periodo,),
-    ).fetchall()
-    return filas
-
-
-def _fechas_especiales_proximas(conn: sqlite3.Connection, dias_ventana: int = 15) -> list[sqlite3.Row]:
-    hoy = fecha_actual(conn)
-    limite = (hoy + timedelta(days=dias_ventana)).isoformat()
-    filas = obtener_repositorio(conn, "FechasEspeciales").listar(Activo=1)
-    return [f for f in filas if hoy.isoformat() <= f["Fecha"] <= limite]
-
-
-def _categoria_x_con_llaves_pendientes(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    filas = conn.execute(
-        """
-        SELECT DISTINCT p.* FROM Profesional p
-        JOIN LlaveMovimiento asig ON asig.IdProfesional = p.IdProfesional AND asig.Tipo = 'Asignación'
-        WHERE p.CategoriaProfesional = 'X'
-          AND NOT EXISTS (SELECT 1 FROM LlaveMovimiento cierre WHERE cierre.IdAsignacion = asig.IdMovimiento)
-        """
-    ).fetchall()
-    return filas
-
-
-def calcular_alertas(conn: sqlite3.Connection) -> Alertas:
-    periodo = periodo_actual(conn)
-    return Alertas(
-        deuda_regulares=_deuda_regulares_alerta(conn),
-        deuda_regulares_mes_anterior=_deuda_regulares(conn),
-        deuda_aisladas=_deuda_aisladas(conn),
-        liquidaciones_regeneradas_no_enviadas=obtener_repositorio(conn, "LiquidacionEmitida").listar(
-            EstadoEnvio="Regenerada no enviada",
-        ),
-        planes_con_cuotas_vencidas=_planes_con_cuotas_vencidas(conn, periodo),
-        fechas_especiales_proximas=_fechas_especiales_proximas(conn),
-        categoria_x_con_llaves_pendientes=_categoria_x_con_llaves_pendientes(conn),
-        backup_vencido=_backup_vencido(conn, fecha_actual(conn)),
-    )
-
-
 # --------------------------------------------------------------------------
 # Cuadritos informativos del Panel de control (revisión "uno por uno", ver
-# CLAUDE.md): estadísticas puntuales, independientes de las alertas de
-# arriba (que ahora viven en su propio cuadrito, "Alertas").
+# CLAUDE.md): estadísticas puntuales. La sección de Alertas que vivía acá
+# (una tarjeta propia, "Alertas") se sacó a pedido explícito de la clienta
+# — `_deuda_regulares`/`_deuda_aisladas` de arriba siguen en pie porque el
+# cuadrito "Profesionales" las sigue usando; el resto de las funciones que
+# solo alimentaban esa tarjeta (`calcular_alertas`/`Alertas`/
+# `_deuda_regulares_alerta`/`_reserva_regular_activa`/`_planes_con_cuotas_
+# vencidas`/`_fechas_especiales_proximas`/`_categoria_x_con_llaves_
+# pendientes`) se borraron con ella, sin uso en ningún otro lado.
 # --------------------------------------------------------------------------
 
 

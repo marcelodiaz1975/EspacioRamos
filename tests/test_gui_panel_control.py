@@ -20,6 +20,7 @@ from app.gui.main_window import Seccion, VentanaPrincipal
 from app.gui.pantallas.panel_control import PanelControl
 from app.negocio.backup import activar_modo_sin_sincronizar, generar_backup
 from app.negocio.lista_espera import crear_pedido
+from app.repositorio.registro import obtener_repositorio
 
 
 def _tarjeta_de(widget):
@@ -32,29 +33,6 @@ def _tarjeta_de(widget):
         actual = actual.parentWidget()
     assert actual is not None, "no se encontró ningún ancestro cuadritoInfo"
     return actual
-from app.repositorio.registro import obtener_repositorio
-
-
-def _textos_visibles(widget) -> list[str]:
-    return [label.text() for label in widget.findChildren(QLabel)]
-
-
-def _crear_profesional_regular_con_deuda(conn, apellido: str, saldo: float) -> int:
-    """La alerta de deuda regular (ver `panel_control._deuda_regulares_
-    alerta`) exige, además del saldo del mes EN CURSO (`SaldoCuentaActual`
-    — no el arrastrado de meses anteriores), una `ReservaRegular` vigente
-    hoy."""
-    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
-    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
-    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(IdUnidad=id_unidad, NumeroConsultorio=1)
-    id_profesional = obtener_repositorio(conn, "Profesional").crear(
-        CategoriaProfesional="R", Apellido=apellido, SaldoCuentaActual=saldo,
-    )
-    obtener_repositorio(conn, "ReservaRegular").crear(
-        IdProfesional=id_profesional, IdConsultorio=id_consultorio, DiaSemana="Lunes",
-        HoraInicio=10, HoraFin=11, VigenciaInicio="2020-01-01", VigenciaFin=None,
-    )
-    return id_profesional
 
 
 @pytest.fixture
@@ -126,30 +104,6 @@ def test_panel_control_boton_avanzar_habilitado_a_mitad_de_mes(qtbot, conn):
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     assert pantalla.panel_avance.boton_avanzar.isEnabled() is True
-
-
-def test_panel_control_sin_alertas_muestra_mensaje(qtbot, conn):
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    assert any("Sin alertas pendientes." in t for t in _textos_visibles(pantalla.panel_avance.contenedor_alertas))
-
-
-def test_panel_control_alerta_de_deuda_se_muestra(qtbot, conn):
-    _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    assert any("Deudor" in t for t in _textos_visibles(pantalla.panel_avance.contenedor_alertas))
-
-
-def test_panel_control_alerta_de_backup_vencido_se_muestra(qtbot, conn, tmp_path):
-    conn.execute(
-        "UPDATE Configuracion SET CarpetaBackup = ?, FrecuenciaBackupDrive = 'Diario' WHERE IdConfiguracion = 1",
-        (str(tmp_path / "backups"),),
-    )
-    conn.commit()
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    assert any("Backup vencido" in t for t in _textos_visibles(pantalla.panel_avance.contenedor_alertas))
 
 
 def test_generar_backup_sin_carpeta_configurada_no_falla(qtbot, conn):
@@ -631,6 +585,77 @@ def test_tarjeta_cumpleanos_lista_profesionales_y_dias_de_profesion(qtbot, conn)
     assert "mar 25-08 — Día del Psicólogo" in texto
 
 
+def _crear_concepto_control_pagos(conn, nombre="Edenor"):
+    from app.negocio.control_pagos import crear_concepto, generar_instancias_periodo
+    from app.negocio.dias import periodo_actual
+
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="1A")
+    id_concepto = crear_concepto(
+        conn, nombre=nombre, categoria="Servicios", tipo_afectacion="Unidad", id_unidad=id_unidad,
+    )
+    generar_instancias_periodo(conn, periodo_actual(conn))
+    return obtener_repositorio(conn, "InstanciaControlPago").listar(
+        IdConcepto=id_concepto, Periodo=periodo_actual(conn),
+    )[0]
+
+
+def test_tarjeta_control_pagos_muestra_los_siete_conteos(qtbot, conn):
+    """Pedido explícito de la clienta: réplica de las siete etiquetas de
+    conteo de "Carga y control" (`app.negocio.control_pagos.
+    resumen_conteo_vencimientos`)."""
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1")
+    _crear_concepto_control_pagos(conn)
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.panel_avance.etiqueta_control_pagos.text()
+    assert "Conceptos por cargar: 1" in texto
+    assert "Con vencimiento hoy: 0" in texto
+    assert "Con vencimiento mañana: 0" in texto
+    assert "Con vencimiento en días: 0" in texto
+    assert "Con vencimiento vencido: 0" in texto
+    assert "Conceptos archivados: 0" in texto
+    assert "Total conceptos: 1" in texto
+
+
+def test_tarjeta_control_pagos_resalta_vencimiento_hoy_y_mañana_en_rojo_y_negrita(qtbot, conn):
+    from app.negocio.control_pagos import actualizar_instancia
+
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1")
+    instancia_hoy = _crear_concepto_control_pagos(conn, nombre="Edenor")
+    instancia_mañana = _crear_concepto_control_pagos(conn, nombre="AYSA")
+    actualizar_instancia(conn, instancia_hoy["IdInstancia"], vencimiento="2026-08-15", importe=1000)
+    actualizar_instancia(conn, instancia_mañana["IdInstancia"], vencimiento="2026-08-16", importe=1000)
+
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+
+    texto = pantalla.panel_avance.etiqueta_control_pagos.text()
+    assert f'<span style="color:{COLOR_ROJO}; font-weight:bold;">Con vencimiento hoy: 1</span>' in texto
+    assert f'<span style="color:{COLOR_ROJO}; font-weight:bold;">Con vencimiento mañana: 1</span>' in texto
+    assert "Con vencimiento en días: 0" in texto  # sin resaltar, texto plano
+
+
+def test_tarjeta_control_pagos_sin_vencimientos_proximos_no_resalta(qtbot, conn):
+    conn.execute("UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = '2026-08-15' WHERE IdConfiguracion = 1")
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    texto = pantalla.panel_avance.etiqueta_control_pagos.text()
+    assert "color" not in texto
+    assert "Con vencimiento hoy: 0" in texto
+
+
+def test_tarjetas_vacias_no_tienen_contenido_asignado(qtbot, conn):
+    """Pedido explícito de la clienta: dos cuadritos nuevos quedan sin
+    asignar por el momento — solo el título."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    for tarjeta in (pantalla.panel_avance.tarjeta_vacia_1, pantalla.panel_avance.tarjeta_vacia_2):
+        etiquetas = tarjeta.findChildren(QLabel)
+        assert len(etiquetas) == 1  # solo el encabezado del título
+        assert etiquetas[0].text() == "(Sin asignar):"
+
+
 def test_cada_cuadrito_principal_tiene_su_propio_scroll_area(qtbot, conn):
     """Punto 78: cada uno de los seis cuadritos (período, backup,
     ocupación, profesionales, fechas especiales, cumpleaños) tiene que
@@ -655,31 +680,7 @@ def test_tarjeta_periodo_muestra_periodo_y_reloj_en_el_mismo_cuadrito(qtbot, con
     assert _tarjeta_de(pantalla.panel_avance.etiqueta_periodo) is _tarjeta_de(pantalla.panel_avance.etiqueta_reloj)
 
 
-def test_tarjeta_alertas_sigue_mostrando_las_alertas_de_siempre(qtbot, conn):
-    _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    assert any("Deudor" in t for t in _textos_visibles(pantalla.panel_avance.contenedor_alertas))
-
-
-def test_refrescar_alertas_dos_veces_no_deja_la_tarjeta_vieja_visible(qtbot, conn):
-    """Bug detectado al revisar capturas: `_refrescar_alertas` sacaba la
-    tarjeta vieja del layout y la mandaba a `deleteLater()`, pero sin
-    ocultarla de una seguía pintada en su posición vieja hasta que el
-    event loop procesara el borrado — se veía como una tarjeta
-    "fantasma" duplicada debajo de la real."""
-    _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    panel = pantalla.panel_avance
-    tarjeta_vieja = panel.layout_alertas.itemAt(0).widget()
-
-    panel.actualizar()  # mismos datos: fuerza sacar y recrear la tarjeta
-
-    assert tarjeta_vieja.isHidden()
-
-
-def _seis_tarjetas(panel) -> list:
+def _nueve_tarjetas(panel) -> list:
     return [
         _tarjeta_de(panel.etiqueta_periodo),
         _tarjeta_de(panel.etiqueta_estadisticas_principales),
@@ -687,23 +688,25 @@ def _seis_tarjetas(panel) -> list:
         _tarjeta_de(panel.etiqueta_profesionales),
         _tarjeta_de(panel.etiqueta_fechas_especiales),
         _tarjeta_de(panel.etiqueta_cumpleanos),
+        _tarjeta_de(panel.etiqueta_control_pagos),
+        panel.tarjeta_vacia_1,
+        panel.tarjeta_vacia_2,
     ]
 
 
-def test_hay_seis_tarjetas_parejas_en_dos_filas_y_alertas_aparte(qtbot, conn):
-    """Punto 76 (SistemaDF v0.11.2026.10): "Fecha y hora actual" se funde
-    dentro de "Período actual" — de 7 cuadritos (3+3+1 suelto) vuelve a
-    6 (3+3 parejo, sin ninguno sobrando en una fila propia). Punto 82:
-    las dos filas de tres ya NO viven en un único `QGridLayout` — cada
-    una es su propio `QHBoxLayout`, hermano del de Alertas en
-    `layout_solapa` (ver el comentario grande en `_armar_ui`)."""
+def test_hay_nueve_tarjetas_parejas_en_tres_filas(qtbot, conn):
+    """Pedido explícito de la clienta: se saca la sección de Alertas (ver
+    docs/historial para el detalle de las rondas anteriores, que vivía
+    en una tarjeta aparte de ancho completo) y en su lugar se suman tres
+    cuadritos más, del mismo ancho/alto que los otros seis — la grilla
+    pasa de 2 filas de 3 a 3 filas de 3 (9 en total)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 800)
     pantalla.show()
     qtbot.waitExposed(pantalla)
 
-    tarjetas = _seis_tarjetas(pantalla.panel_avance)
+    tarjetas = _nueve_tarjetas(pantalla.panel_avance)
     assert all(t is not None for t in tarjetas)
 
     # Tolerancia chica: el reparto de una división no exacta (ancho/alto
@@ -711,25 +714,8 @@ def test_hay_seis_tarjetas_parejas_en_dos_filas_y_alertas_aparte(qtbot, conn):
     # simple vista pero real en píxeles.
     anchos = [t.width() for t in tarjetas]
     altos = [t.height() for t in tarjetas]
-    assert max(anchos) - min(anchos) <= 8  # las seis del mismo ancho
-    assert max(altos) - min(altos) <= 8  # las seis del mismo alto
-
-
-def test_tarjeta_alertas_no_es_ninguna_de_las_seis_tarjetas(qtbot, conn):
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    tarjetas = _seis_tarjetas(pantalla.panel_avance)
-    assert pantalla.panel_avance.tarjeta_alertas not in tarjetas
-
-
-def test_tarjeta_alertas_ocupa_mucho_mas_ancho_que_una_tarjeta_de_las_filas(qtbot, conn):
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    pantalla.resize(1200, 800)
-    pantalla.show()
-    qtbot.waitExposed(pantalla)
-    ancho_una_tarjeta = _seis_tarjetas(pantalla.panel_avance)[0].width()
-    assert pantalla.panel_avance.tarjeta_alertas.width() > ancho_una_tarjeta * 2
+    assert max(anchos) - min(anchos) <= 8  # las nueve del mismo ancho
+    assert max(altos) - min(altos) <= 8  # las nueve del mismo alto
 
 
 def test_titulos_de_las_tarjetas_van_en_negrita_e_italica_con_dos_puntos(qtbot, conn):
@@ -909,50 +895,18 @@ def test_scroll_de_cada_cuadrito_principal_tiene_fondo_transparente(qtbot, conn)
     """Punto 81: sin esto, el viewport del `QScrollArea` pintaba con el
     color de la paleta (`autoFillBackground` + `Base`) — un recuadro de
     color distinto al resto del cuadrito ("un cuadrito adentro del
-    cuadrito"). `autoFillBackground(False)`, no un `setStyleSheet(...)`:
-    ver `test_el_fondo_transparente_de_alertas_no_le_pisa_el_color_a_los_
-    titulos` para el motivo (un stylesheet ahí rompía el color de los
-    títulos de alerta, que están mucho más anidados)."""
+    cuadrito"). `autoFillBackground(False)`, no un `setStyleSheet(...)`."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     for etiqueta in (
         pantalla.panel_avance.etiqueta_periodo, pantalla.panel_avance.etiqueta_estadisticas_principales,
         pantalla.panel_avance.etiqueta_ocupacion, pantalla.panel_avance.etiqueta_profesionales,
         pantalla.panel_avance.etiqueta_fechas_especiales, pantalla.panel_avance.etiqueta_cumpleanos,
+        pantalla.panel_avance.etiqueta_control_pagos,
     ):
         tarjeta = _tarjeta_de(etiqueta)
         scroll = tarjeta.findChild(QScrollArea)
         assert scroll.viewport().autoFillBackground() is False
-
-
-def test_scroll_de_alertas_tambien_tiene_fondo_transparente(qtbot, conn):
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    scroll = pantalla.panel_avance.tarjeta_alertas.findChild(QScrollArea)
-    assert scroll.viewport().autoFillBackground() is False
-
-
-def test_el_fondo_transparente_de_alertas_no_le_pisa_el_color_a_los_titulos(qtbot, conn):
-    """Bug real, detectado por la clienta probando la pantalla: un
-    `setStyleSheet("background: transparent;")` puesto en el `QScrollArea`
-    de Alertas (un ancestro de cada `QFrame#tarjetaAlerta`/`QLabel#
-    encabezadoAlerta`) le cambiaba el motor de pintado a TODOS los
-    descendientes y terminaba pisándole el fondo naranja/letra blanca al
-    título de cada alerta, pese a que esa regla tiene su propio selector
-    por objectName en `estilos.py`. No debe quedar ningún `styleSheet`
-    puesto en el `QScrollArea` ni en su viewport — el arreglo tiene que
-    ser por `autoFillBackground`, que no pasa por ese motor."""
-    _crear_profesional_regular_con_deuda(conn, "Deudor", 99999)
-    pantalla = PanelControl(conn)
-    qtbot.addWidget(pantalla)
-    scroll = pantalla.panel_avance.tarjeta_alertas.findChild(QScrollArea)
-    assert scroll.styleSheet() == ""
-    assert scroll.viewport().styleSheet() == ""
-    encabezado = next(
-        lbl for lbl in pantalla.panel_avance.contenedor_alertas.findChildren(QLabel)
-        if lbl.objectName() == "encabezadoAlerta"
-    )
-    assert "border" not in encabezado.styleSheet()  # sin estilo local que pueda competir con estilos.py
 
 
 def test_contenido_de_un_solo_label_se_alinea_arriba_no_al_centro(qtbot, conn):
@@ -964,7 +918,7 @@ def test_contenido_de_un_solo_label_se_alinea_arriba_no_al_centro(qtbot, conn):
     for etiqueta in (
         pantalla.panel_avance.etiqueta_estadisticas_principales, pantalla.panel_avance.etiqueta_ocupacion,
         pantalla.panel_avance.etiqueta_profesionales, pantalla.panel_avance.etiqueta_fechas_especiales,
-        pantalla.panel_avance.etiqueta_cumpleanos,
+        pantalla.panel_avance.etiqueta_cumpleanos, pantalla.panel_avance.etiqueta_control_pagos,
     ):
         assert etiqueta.alignment() & Qt.AlignmentFlag.AlignTop
 
@@ -979,15 +933,14 @@ def test_alto_minimo_de_tarjeta_bajo_a_dos_tercios(qtbot, conn):
     assert _ALTO_MINIMO_TARJETA == 93  # round(140 * 2 / 3)
 
 
-def test_fila1_fila2_y_alertas_quedan_del_mismo_alto(qtbot, conn):
-    """Punto 82 (SistemaDF v0.11.2026.10), pedido explícito de la
-    clienta: todo el alto que queda debajo de "Avanzar de mes" se reparte
-    en tres franjas IGUALES — primera fila de tres cuadritos, segunda
-    fila, y Alertas — no que Alertas se quede con lo que sobra después de
-    que las filas tomen lo que piden. Antes la grilla y Alertas competían
-    con stretch 0 vs 1 (Alertas terminaba mucho más chica o mucho más
-    grande según la ventana, nunca igual); ahora las tres son hermanas de
-    `layout_solapa` con el mismo `stretch=1`."""
+def test_fila1_fila2_y_fila3_quedan_del_mismo_alto(qtbot, conn):
+    """Punto 82 (SistemaDF v0.11.2026.10): todo el alto que queda debajo
+    de "Avanzar de mes" se reparte en franjas IGUALES — cada fila de
+    tres cuadritos es hermana de `layout_solapa` con el mismo
+    `stretch=1`. Pedido explícito de la clienta (ronda posterior):
+    la tercera franja, que antes era la tarjeta de Alertas de ancho
+    completo, ahora es una fila de tres cuadritos más (Control de
+    pagos + dos sin asignar), del mismo criterio que las otras dos."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     pantalla.resize(1200, 900)
@@ -995,7 +948,7 @@ def test_fila1_fila2_y_alertas_quedan_del_mismo_alto(qtbot, conn):
     qtbot.waitExposed(pantalla)
     alto_fila1 = _tarjeta_de(pantalla.panel_avance.etiqueta_periodo).height()
     alto_fila2 = _tarjeta_de(pantalla.panel_avance.etiqueta_profesionales).height()
-    alto_alertas = pantalla.panel_avance.tarjeta_alertas.height()
+    alto_fila3 = _tarjeta_de(pantalla.panel_avance.etiqueta_control_pagos).height()
     # Tolerancia chica: redondeo de QBoxLayout al repartir píxeles entre
     # tres ítems, invisible a simple vista.
-    assert max(alto_fila1, alto_fila2, alto_alertas) - min(alto_fila1, alto_fila2, alto_alertas) <= 8
+    assert max(alto_fila1, alto_fila2, alto_fila3) - min(alto_fila1, alto_fila2, alto_fila3) <= 8

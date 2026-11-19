@@ -159,9 +159,8 @@ from app.negocio.backup import (
 )
 from app.negocio.dias import fecha_a_dia_semana, fecha_actual, fecha_real, periodo_actual
 from app.negocio.formato import formatear_moneda, mes_texto, periodo_mm_aaaa
+from app.negocio.control_pagos import resumen_conteo_vencimientos
 from app.negocio.panel_control import (
-    Alertas,
-    calcular_alertas,
     calcular_estadisticas_ocupacion,
     calcular_estadisticas_ocupacion_por_unidad,
     calcular_estadisticas_principales,
@@ -198,29 +197,6 @@ _TEXTO_EXPLICACION_AVANZAR = (
     "Avanzar de mes realiza el pase de un mes a otro en el sistema. Este proceso ubica virtualmente al "
     "operador en el nuevo período cualquier sea la fecha real del día."
 )
-
-_TITULOS_ALERTA = {
-    "deuda_regulares": "Deuda mes en curso — profesionales regulares",
-    "deuda_regulares_mes_anterior": "Deuda mes anterior — profesionales regulares",
-    "deuda_aisladas": "Deuda mes anterior — profesionales de reserva aislada",
-    "liquidaciones_regeneradas_no_enviadas": "Liquidaciones regeneradas sin enviar",
-    "planes_con_cuotas_vencidas": "Planes de pago con cuotas vencidas",
-    "fechas_especiales_proximas": "Fechas especiales en los próximos 15 días",
-    "categoria_x_con_llaves_pendientes": "Profesionales inactivos con llaves sin devolver",
-}
-
-_ETIQUETA_FILA = {
-    "deuda_regulares": lambda f: f"{f['Apellido']} — saldo actual {formatear_moneda(f['SaldoCuentaActual'])}",
-    "deuda_regulares_mes_anterior": lambda f: (
-        f"{f['Apellido']} — saldo anterior {formatear_moneda(f['SaldoCuentaAnterior'])}"
-    ),
-    "deuda_aisladas": lambda f: f"{f['Apellido']} — saldo anterior {formatear_moneda(f['SaldoCuentaAnterior'])}",
-    "liquidaciones_regeneradas_no_enviadas": lambda f: f"Liquidación #{f['IdLiquidacion']} — período {f['Periodo']}",
-    "planes_con_cuotas_vencidas": lambda f: f"Plan #{f['IdPlan']}",
-    "fechas_especiales_proximas": lambda f: f"{f['Fecha']} — {f['Descripcion'] or f['Tipo']}",
-    "categoria_x_con_llaves_pendientes": lambda f: f["Apellido"],
-}
-
 
 def _linea_divisoria() -> QFrame:
     linea = QFrame()
@@ -502,6 +478,16 @@ class _PanelAvancePeriodo(QWidget):
         # así terminan siempre del mismo alto (verificado armando la
         # pantalla real y midiendo alto en píxeles, no solo leyendo el
         # código — ver docs/historial para el detalle de la ronda).
+        # Pedido explícito de la clienta: se saca la sección de Alertas
+        # (ver docs/historial para el detalle de las rondas anteriores,
+        # que vivía en una tarjeta aparte de ancho completo) y en su
+        # lugar se suman tres cuadritos más, iguales a los seis de
+        # arriba — la grilla pasa de 2 filas de 3 a 3 filas de 3 (9 en
+        # total). El de la izquierda de esta tercera fila es "Control
+        # de pagos" (réplica de las etiquetas de conteo de "Carga y
+        # control", ver `_armar_tarjeta_control_pagos`); los otros dos
+        # quedan sin asignar por el momento (pedido explícito: vacíos
+        # hasta que la clienta decida qué contenido llevan).
         tarjetas = [
             self._armar_tarjeta_periodo_y_backup(),
             self._armar_tarjeta_estadisticas_principales(),
@@ -509,22 +495,15 @@ class _PanelAvancePeriodo(QWidget):
             self._armar_tarjeta_profesionales(),
             self._armar_tarjeta_fechas_especiales(),
             self._armar_tarjeta_cumpleanos(),
+            self._armar_tarjeta_control_pagos(),
+            self._armar_tarjeta_vacia("vacia_1"),
+            self._armar_tarjeta_vacia("vacia_2"),
         ]
-        fila_tarjetas_1 = QHBoxLayout()
-        fila_tarjetas_2 = QHBoxLayout()
-        for tarjeta in tarjetas[:_COLUMNAS_GRILLA]:
-            fila_tarjetas_1.addWidget(tarjeta, stretch=1)
-        for tarjeta in tarjetas[_COLUMNAS_GRILLA:]:
-            fila_tarjetas_2.addWidget(tarjeta, stretch=1)
-        layout_solapa.addLayout(fila_tarjetas_1, stretch=1)
-        layout_solapa.addLayout(fila_tarjetas_2, stretch=1)
-
-        # Alertas ocupa todo el ancho de la pantalla, con scroll propio
-        # (puede ser una lista larga) — pedido explícito de la clienta,
-        # a diferencia de los seis cuadritos parejos de arriba. Mismo
-        # stretch que las dos filas de arriba (ver el comentario grande):
-        # las tres franjas quedan del mismo alto.
-        layout_solapa.addWidget(self._armar_tarjeta_alertas(), stretch=1)
+        for inicio in range(0, len(tarjetas), _COLUMNAS_GRILLA):
+            fila = QHBoxLayout()
+            for tarjeta in tarjetas[inicio:inicio + _COLUMNAS_GRILLA]:
+                fila.addWidget(tarjeta, stretch=1)
+            layout_solapa.addLayout(fila, stretch=1)
 
         self._foco = instalar_enter_avanza_foco(
             [self.boton_backup, self.boton_restaurar, self.boton_avanzar], parent=self,
@@ -629,38 +608,31 @@ class _PanelAvancePeriodo(QWidget):
         _agregar_contenido_escrolable(layout, self.etiqueta_cumpleanos)
         return tarjeta
 
-    def _armar_tarjeta_alertas(self) -> QFrame:
-        """Mismo criterio de fondo transparente que el resto de los
-        cuadritos (`_agregar_contenido_escrolable`) — acá no se reusa esa
-        función porque Alertas no muestra un solo QLabel sino una lista de
-        tarjetas propias (`contenedor_alertas`/`layout_alertas`), pero el
-        bug de fondo (el viewport del QScrollArea con un color distinto
-        al resto del cuadrito) es el mismo. La alineación arriba ya la
-        daba gratis `layout_alertas.addStretch()` al final, sin tocar.
+    def _armar_tarjeta_control_pagos(self) -> QFrame:
+        """Pedido explícito de la clienta: réplica de las siete etiquetas
+        de conteo de "Carga y control" (`_PanelCargaControl`, `app/gui/
+        pantallas/control_pagos.py`) — mismos siete números, calculados
+        acá sin filtro (`resumen_conteo_vencimientos`, `app.negocio.
+        control_pagos`, ver su docstring: mismo alcance que la tabla de
+        esa solapa, pero sin los cuatro filtros que ahí sí se aplican).
+        "Con vencimiento hoy"/"Con vencimiento mañana" van en rojo y
+        negrita cuando hay al menos uno — pedido explícito, a diferencia
+        del resto de las líneas, que quedan en texto plano siempre."""
+        tarjeta, layout = _tarjeta("Control de pagos")
+        self.etiqueta_control_pagos = QLabel()
+        self.etiqueta_control_pagos.setWordWrap(True)
+        self.etiqueta_control_pagos.setTextFormat(Qt.TextFormat.RichText)
+        _agregar_contenido_escrolable(layout, self.etiqueta_control_pagos)
+        return tarjeta
 
-        Importante: el fondo se arregla con `setAutoFillBackground(False)`,
-        NO con un `setStyleSheet(...)` como se probó primero — un
-        stylesheet puesto en el `QScrollArea`/viewport (un ancestro de
-        cada `QFrame#tarjetaAlerta`/`QLabel#encabezadoAlerta`) le cambiaba
-        el motor de pintado a TODOS los descendientes y terminaba
-        pisándole el fondo naranja y la letra blanca al título de cada
-        alerta, pese a que esas reglas tienen su propio selector por
-        objectName en `estilos.py` — la clienta lo detectó probando la
-        pantalla real. `autoFillBackground` no pasa por el motor de
-        stylesheets, así que no corre ese riesgo. Esta parte del arreglo
-        se mantiene (la clienta la confirmó explícitamente); lo único que
-        se revirtió fue el alto fijo de los seis cuadritos de la grilla."""
-        self.tarjeta_alertas, layout = _tarjeta("Alertas")
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.viewport().setAutoFillBackground(False)
-        self.contenedor_alertas = QWidget()
-        self.layout_alertas = QVBoxLayout(self.contenedor_alertas)
-        self.layout_alertas.addStretch()
-        scroll.setWidget(self.contenedor_alertas)
-        layout.addWidget(scroll)
-        return self.tarjeta_alertas
+    def _armar_tarjeta_vacia(self, nombre: str) -> QFrame:
+        """Dos cuadritos nuevos sin contenido asignado todavía — pedido
+        explícito de la clienta: quedan en blanco (solo el título) hasta
+        que decida qué va en cada uno."""
+        tarjeta, layout = _tarjeta("(Sin asignar)")
+        setattr(self, f"tarjeta_{nombre}", tarjeta)
+        layout.addStretch()
+        return tarjeta
 
     def actualizar(self) -> None:
         ruta_db = _ruta_base_datos(self.conn)
@@ -760,67 +732,26 @@ class _PanelAvancePeriodo(QWidget):
             texto_eventos = "Sin cumpleaños ni días de profesión para lo que resta del período."
         self.etiqueta_cumpleanos.setText(texto_eventos)
 
-        alertas = calcular_alertas(self.conn)
-        self._refrescar_alertas(alertas)
+        self._actualizar_tarjeta_control_pagos()
 
-    def _refrescar_alertas(self, alertas: Alertas) -> None:
-        while self.layout_alertas.count() > 1:
-            item = self.layout_alertas.takeAt(0)
-            if item.widget():
-                # `takeAt` solo lo saca del layout — sigue siendo hijo
-                # visible en su última posición hasta que `deleteLater`
-                # se procese de verdad, así que sin este `hide()` puede
-                # quedar pintado un instante de más (fantasma) si esta
-                # función se llama de nuevo antes de que el event loop
-                # llegue a borrarlo.
-                item.widget().hide()
-                item.widget().deleteLater()
+    def _actualizar_tarjeta_control_pagos(self) -> None:
+        resumen = resumen_conteo_vencimientos(self.conn)
 
-        hubo_alertas = False
-        for campo, titulo in _TITULOS_ALERTA.items():
-            filas = getattr(alertas, campo)
-            if not filas:
-                continue
-            hubo_alertas = True
-            tarjeta = self._tarjeta_alerta(titulo, filas, _ETIQUETA_FILA[campo])
-            self.layout_alertas.insertWidget(self.layout_alertas.count() - 1, tarjeta)
+        def _linea(etiqueta: str, clave: str, *, resaltar: bool = False) -> str:
+            texto = f"{etiqueta}: {resumen[clave]}"
+            if resaltar and resumen[clave] > 0:
+                return f'<span style="color:{COLOR_ROJO}; font-weight:bold;">{texto}</span>'
+            return texto
 
-        if alertas.backup_vencido:
-            hubo_alertas = True
-            tarjeta = self._tarjeta_alerta_simple(
-                "Backup vencido según la frecuencia configurada — generá uno nuevo cuando puedas.",
-            )
-            self.layout_alertas.insertWidget(self.layout_alertas.count() - 1, tarjeta)
-
-        if not hubo_alertas:
-            self.layout_alertas.insertWidget(0, QLabel("Sin alertas pendientes."))
-
-    def _tarjeta_alerta_simple(self, mensaje: str) -> QFrame:
-        """Alerta binaria (no una lista de registros) — una sola línea."""
-        tarjeta = QFrame()
-        tarjeta.setObjectName("tarjetaAlerta")
-        layout = QVBoxLayout(tarjeta)
-        layout.setContentsMargins(0, 0, 0, 8)
-        encabezado = QLabel(mensaje)
-        encabezado.setObjectName("encabezadoAlerta")
-        layout.addWidget(encabezado)
-        return tarjeta
-
-    def _tarjeta_alerta(self, titulo: str, filas: list, etiqueta) -> QFrame:
-        tarjeta = QFrame()
-        tarjeta.setObjectName("tarjetaAlerta")
-        layout = QVBoxLayout(tarjeta)
-        layout.setContentsMargins(0, 0, 0, 8)
-
-        encabezado = QLabel(f"{titulo} ({len(filas)})")
-        encabezado.setObjectName("encabezadoAlerta")
-        layout.addWidget(encabezado)
-
-        for fila in filas:
-            etiqueta_widget = QLabel(f"•  {etiqueta(fila)}")
-            etiqueta_widget.setContentsMargins(8, 2, 8, 2)
-            layout.addWidget(etiqueta_widget)
-        return tarjeta
+        self.etiqueta_control_pagos.setText("<br>".join([
+            _linea("Conceptos por cargar", "por_cargar"),
+            _linea("Con vencimiento hoy", "vencimiento_hoy", resaltar=True),
+            _linea("Con vencimiento mañana", "vencimiento_mañana", resaltar=True),
+            _linea("Con vencimiento en días", "vencimiento_en_dias"),
+            _linea("Con vencimiento vencido", "vencimiento_vencido"),
+            _linea("Conceptos archivados", "archivados"),
+            _linea("Total conceptos", "total"),
+        ]))
 
     def _avanzar_mes(self) -> None:
         periodo = periodo_actual(self.conn)
