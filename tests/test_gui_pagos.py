@@ -222,9 +222,11 @@ def test_tabla_registrar_pagos_periodo_imputado_registro_modificado_y_es_ajuste_
     assert panel.tabla.item(0, 9).textAlignment() == Qt.AlignmentFlag.AlignCenter  # Es ajuste
 
 
-def test_tabla_registrar_pagos_monto_saldos_al_mismo_ancho_que_registro_modificado(qtbot, conn):
-    """Pedido explícito de la clienta: "Monto", "Saldo anterior" y
-    "Nuevo saldo" al mismo ancho que "Registro modificado"."""
+def test_tabla_registrar_pagos_monto_saldos_se_achican_un_40_por_ciento(qtbot, conn):
+    """Pedido explícito de la clienta: "Monto"/"Saldo previo"/"Nuevo
+    saldo" se achican un 40% de su ancho natural (ya no quedan al mismo
+    ancho que "Registro modificado", que ahora va solo al mínimo gracias
+    al encabezado partido en dos líneas)."""
     id_profesional = _crear_profesional(conn, saldo=10000)
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
@@ -232,11 +234,36 @@ def test_tabla_registrar_pagos_monto_saldos_al_mismo_ancho_que_registro_modifica
     _seleccionar_profesional(panel, id_profesional)
     panel.spin_monto.setValue(500)
     panel._registrar()
+    ancho_achicado_monto = panel.tabla.columnWidth(3)
+    ancho_achicado_saldo_previo = panel.tabla.columnWidth(4)
+    ancho_achicado_nuevo_saldo = panel.tabla.columnWidth(5)
 
-    ancho_registro_modificado = panel.tabla.columnWidth(8)
-    assert panel.tabla.columnWidth(3) == ancho_registro_modificado  # Monto
-    assert panel.tabla.columnWidth(6) == ancho_registro_modificado  # Saldo anterior
-    assert panel.tabla.columnWidth(7) == ancho_registro_modificado  # Nuevo saldo
+    # mismas filas, mismo contenido: recalcular el ancho natural (sin
+    # el achique del 40%) tiene que dar, redondeado (±1px por posibles
+    # redondeos internos de Qt), el ancho de antes.
+    panel.tabla.resizeColumnsToContents()
+
+    assert abs(ancho_achicado_monto - round(panel.tabla.columnWidth(3) * 0.6)) <= 1
+    assert abs(ancho_achicado_saldo_previo - round(panel.tabla.columnWidth(4) * 0.6)) <= 1
+    assert abs(ancho_achicado_nuevo_saldo - round(panel.tabla.columnWidth(5) * 0.6)) <= 1
+
+
+def test_tabla_registrar_pagos_encabezados_partidos_en_dos_lineas(qtbot, conn):
+    """Pedido explícito de la clienta: fila de títulos al doble de alto
+    (consecuencia automática de partir "Período imputado"/"Saldo
+    previo"/"Nuevo saldo"/"Registro modificado" en dos líneas — mismo
+    mecanismo que `estadisticas._COLUMNAS`, QHeaderView ya agranda solo
+    el alto de la fila de encabezados con un "\\n")."""
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+
+    assert panel.tabla.horizontalHeaderItem(2).text() == "Período\nimputado"
+    assert panel.tabla.horizontalHeaderItem(4).text() == "Saldo\nprevio"
+    assert panel.tabla.horizontalHeaderItem(5).text() == "Nuevo\nsaldo"
+    assert panel.tabla.horizontalHeaderItem(8).text() == "Registro\nmodificado"
+    alto_una_linea = panel.tabla.horizontalHeader().fontMetrics().height()
+    assert panel.tabla.horizontalHeader().height() > alto_una_linea
 
 
 def test_registrar_pago_positivo_suma_saldo_actual(qtbot, conn):
@@ -835,8 +862,8 @@ def test_tabla_pagos_columnas_y_orden(qtbot, conn):
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
     assert [panel.tabla.horizontalHeaderItem(i).text() for i in range(panel.tabla.columnCount())] == [
-        "Fecha de carga", "Profesional", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
-        "Saldo previo", "Nuevo saldo", "Registro modificado", "Es ajuste",
+        "Fecha de carga", "Profesional", "Período\nimputado", "Monto", "Saldo\nprevio", "Nuevo\nsaldo",
+        "Medio de pago", "Cuenta receptora", "Registro\nmodificado", "Es ajuste",
     ]
 
     _seleccionar_profesional(panel, id_profesional)
@@ -1141,12 +1168,12 @@ def test_tabla_registrar_pago_click_en_columna_ordena_y_alterna_sentido(qtbot, c
         panel._registrar()
     assert panel.tabla.rowCount() == 2
 
-    panel.tabla.horizontalHeader().sectionClicked.emit(4)  # "Medio de pago" ascendente
-    medios_asc = [panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())]
+    panel.tabla.horizontalHeader().sectionClicked.emit(6)  # "Medio de pago" ascendente
+    medios_asc = [panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())]
     assert medios_asc == ["Cheque", "Efectivo"]
 
-    panel.tabla.horizontalHeader().sectionClicked.emit(4)  # de nuevo -> descendente
-    medios_desc = [panel.tabla.item(f, 4).text() for f in range(panel.tabla.rowCount())]
+    panel.tabla.horizontalHeader().sectionClicked.emit(6)  # de nuevo -> descendente
+    medios_desc = [panel.tabla.item(f, 6).text() for f in range(panel.tabla.rowCount())]
     assert medios_desc == ["Efectivo", "Cheque"]
 
 
@@ -1369,8 +1396,8 @@ def test_saldo_anterior_y_nuevo_saldo_se_colorean_en_negativo(qtbot, conn):
     panel.spin_monto.setValue(-500)  # deja el saldo en negativo
     panel._registrar()
 
-    assert panel.tabla.item(0, 6).foreground().color() != QColor(COLOR_ROJO)  # saldo anterior: 100, positivo
-    assert panel.tabla.item(0, 7).foreground().color() == QColor(COLOR_ROJO)  # nuevo saldo: -400, negativo
+    assert panel.tabla.item(0, 4).foreground().color() != QColor(COLOR_ROJO)  # saldo anterior: 100, positivo
+    assert panel.tabla.item(0, 5).foreground().color() == QColor(COLOR_ROJO)  # nuevo saldo: -400, negativo
     assert panel.tabla.item(0, 3).foreground().color() == QColor(COLOR_ROJO)  # el Monto también
 
 

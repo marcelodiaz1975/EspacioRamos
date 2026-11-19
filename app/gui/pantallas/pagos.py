@@ -436,9 +436,19 @@ class _PanelRegistrarPago(QWidget):
         self.tabla = QTableWidget()
         excluir_tabla_del_tab(self.tabla)
         self.tabla.setColumnCount(10)
+        # Pedido explícito de la clienta: "Saldo previo"/"Nuevo saldo"
+        # pasan a ir justo después de "Monto" (antes de "Medio de
+        # pago"/"Cuenta receptora", que siguen en el mismo orden relativo
+        # entre sí) — ver `_clave_orden`/`actualizar` más abajo, que usan
+        # estos mismos índices. Encabezados partidos en dos líneas
+        # ("\n", mismo mecanismo que `estadisticas._COLUMNAS` — QHeaderView
+        # ya agranda solo el alto de la fila y achica la columna al ancho
+        # de la palabra más larga, sin que haga falta nada más) en
+        # "Período imputado"/"Saldo previo"/"Nuevo saldo"/"Registro
+        # modificado" para que esas columnas queden al ancho mínimo.
         self.tabla.setHorizontalHeaderLabels([
-            "Fecha de carga", "Profesional", "Período imputado", "Monto", "Medio de pago", "Cuenta receptora",
-            "Saldo previo", "Nuevo saldo", "Registro modificado", "Es ajuste",
+            "Fecha de carga", "Profesional", "Período\nimputado", "Monto", "Saldo\nprevio", "Nuevo\nsaldo",
+            "Medio de pago", "Cuenta receptora", "Registro\nmodificado", "Es ajuste",
         ])
         self.tabla.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tabla.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -563,23 +573,22 @@ class _PanelRegistrarPago(QWidget):
             self.tabla.setItem(i, 1, QTableWidgetItem(_texto_profesional(profesional) if profesional else "?"))
             self.tabla.setItem(i, 2, item_centrado(r["PeriodoImputado"] or ""))
             self._poner_item_monto(i, 3, r["Monto"])
-            self.tabla.setItem(i, 4, QTableWidgetItem(r["MedioPago"] or ""))
-            self.tabla.setItem(i, 5, QTableWidgetItem(r["CuentaReceptora"] or ""))
-            self._poner_item_monto(i, 6, r["SaldoAnterior"])
-            self._poner_item_monto(i, 7, r["SaldoNuevo"])
+            self._poner_item_monto(i, 4, r["SaldoAnterior"])
+            self._poner_item_monto(i, 5, r["SaldoNuevo"])
+            self.tabla.setItem(i, 6, QTableWidgetItem(r["MedioPago"] or ""))
+            self.tabla.setItem(i, 7, QTableWidgetItem(r["CuentaReceptora"] or ""))
             self.tabla.setItem(i, 8, item_centrado("Sí" if r["RegistroModificado"] else "No"))
             self.tabla.setItem(i, 9, item_centrado("Sí" if r["EsAjuste"] else "No"))
         self.tabla.resizeColumnsToContents()
         self.tabla.setColumnWidth(1, max(self.tabla.columnWidth(1), _ANCHO_COL_PROFESIONAL))
-        # Pedido explícito de la clienta: "Monto"/"Saldo previo"/
-        # "Nuevo saldo" al mismo ancho que "Registro
-        # modificado" — se toma ESE ancho ya calculado por
-        # `resizeColumnsToContents()` (columna 8) como ancho común para
-        # las tres, igual que el resto del sistema usa una columna de
-        # referencia como piso/ancho común.
-        ancho_registro_modificado = self.tabla.columnWidth(8)
-        for columna in (3, 6, 7):
-            self.tabla.setColumnWidth(columna, ancho_registro_modificado)
+        # Pedido explícito de la clienta: "Monto"/"Saldo previo"/"Nuevo
+        # saldo" se achican un 40% respecto del ancho natural que ya les
+        # dio `resizeColumnsToContents()` — "Período imputado"/"Registro
+        # modificado" no necesitan este paso: ya quedan al mínimo solos,
+        # por el "\n" de sus encabezados (ver `_armar_ui`).
+        for columna in (3, 4, 5):
+            ancho_natural = self.tabla.columnWidth(columna)
+            self.tabla.setColumnWidth(columna, round(ancho_natural * 0.6))
         self._actualizar_tanda()
         self._actualizar_saldos()
         self._actualizar_botones()
@@ -591,10 +600,10 @@ class _PanelRegistrarPago(QWidget):
             1: lambda t: clave_orden_codigo(_texto_profesional(t[1])) if t[1] else ("", -1, ""),
             2: lambda t: t[0]["PeriodoImputado"] or "",
             3: lambda t: t[0]["Monto"],
-            4: lambda t: t[0]["MedioPago"] or "",
-            5: lambda t: t[0]["CuentaReceptora"] or "",
-            6: lambda t: t[0]["SaldoAnterior"] or 0,
-            7: lambda t: t[0]["SaldoNuevo"] or 0,
+            4: lambda t: t[0]["SaldoAnterior"] or 0,
+            5: lambda t: t[0]["SaldoNuevo"] or 0,
+            6: lambda t: t[0]["MedioPago"] or "",
+            7: lambda t: t[0]["CuentaReceptora"] or "",
             8: lambda t: bool(t[0]["RegistroModificado"]),
             9: lambda t: bool(t[0]["EsAjuste"]),
         }

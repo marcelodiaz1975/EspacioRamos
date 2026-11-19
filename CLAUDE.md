@@ -448,3 +448,31 @@ hasta ahora (sección propia con la ronda de trabajo); si esa sección queda
 a la vista, se puede migrar después al archivo que corresponda — no hace
 falta hacerlo en el momento.
 
+## Pagos (Registrar pagos): doble alto de encabezado + reordenar/achicar columnas
+
+Cuatro pedidos puntuales de la clienta sobre la tabla de
+`_PanelRegistrarPago` (`app/gui/pantallas/pagos.py`):
+
+- Encabezados de "Período imputado", "Monto", "Saldo previo", "Nuevo
+  saldo" y "Registro modificado" pasan a dos líneas (`"Período\n
+  imputado"`, etc.) — mismo mecanismo ya usado en Estadísticas:
+  `QHeaderView` agranda solo el alto de la fila de encabezados y angosta
+  la columna a lo que mide la palabra más larga, sin código extra.
+- "Monto", "Saldo previo" y "Nuevo saldo" se achican un 40% respecto al
+  ancho natural (`resizeColumnsToContents()`), calculado sobre la tabla
+  ya con filas cargadas (el ancho natural de una tabla vacía no sirve de
+  referencia).
+- Reorden de columnas: "Saldo previo" y "Nuevo saldo" pasan a estar
+  pegados después de "Monto" (antes del Medio de pago); el resto sigue
+  en el mismo orden relativo.
+- "Registro modificado" también a dos líneas, ancho mínimo.
+
+`_PanelEstadoCuentaPagos` (la otra solapa, "Estado de cuenta") no se
+tocó — el pedido fue puntual de "Registrar pagos".
+
+Tests en `tests/test_gui_pagos.py`: `test_tabla_registrar_pagos_monto_
+saldos_se_achican_un_40_por_ciento` (achicado vs. natural post-carga,
+±1px de tolerancia por redondeo de Qt) y `test_tabla_registrar_pagos_
+encabezados_partidos_en_dos_lineas` (alto de encabezado crece, sin
+asumir un múltiplo exacto). Suite completa de `test_gui_pagos.py` sin
+regresiones (87 tests).
