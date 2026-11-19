@@ -973,3 +973,83 @@ corrida conjunta con `test_control_pagos.py`/`test_migraciones.py`/
 pisó a los anteriores). pyflakes limpio en `app/negocio/panel_control.
 py`, `app/gui/pantallas/panel_control.py` y los dos archivos de test.
 
+## Gastos: tabla ordenable + F5 + otro 25% de ancho; Panel de control: segundo bug real en Saldo pendiente (signo de HistorialPagos.Monto)
+
+### Gastos: orden por click + F5, y otro 25% de ancho
+
+Dos pedidos puntuales más sobre "Gastos" (`_PanelGastos`, `app/gui/
+pantallas/balance.py`), ronda siguiente a la de más arriba:
+
+- Tabla ordenable por click en el encabezado — mismo mecanismo
+  (`OrdenTabla`, `app/gui/widgets/orden_tabla.py`) que "Carga y
+  control"/"Historial"/"Registrar pagos": un click ordena por esa
+  columna, otro click invierte, y el criterio es transitorio (se pierde
+  al reconstruirse el panel). `reiniciar()` (F5) ahora también llama
+  `self._orden.reiniciar()`, mismo criterio que el resto del sistema
+  (CLAUDE.md, "F5... reinicia desde cero").
+- "Nombre"/"Categoría"/"Afectación" ganan otro 25% de ancho SOBRE el
+  30% ya aplicado la ronda anterior — cascada, mismo criterio que
+  "Cuenta/Id"/"Importe" de "Carga y control" (natural×1.3×1.25, el
+  ancho liberado lo sigue absorbiendo sola "Observación").
+
+### Panel de control: segundo bug real en "Saldo pendiente de cobro" — el signo de `HistorialPagos.Monto`
+
+La clienta mandó capturas Y la base de datos real del espacio,
+preguntando directamente qué incluye cada concepto porque "no
+encuentro relación" entre los números — el cuadrito real mostraba
+Saldo pendiente $21.242.875, MÁS GRANDE que Total liquidado
+$14.220.133, matemáticamente imposible con el cálculo de la ronda
+anterior si el signo fuera el asumido (la suma de pendientes por
+profesional, cada uno acotado a no superar su propio liquidado, nunca
+puede superar la suma total liquidada).
+
+**Causa real**: la ronda anterior (ver más arriba) corrigió el "sin
+tope por profesional" pero siguió asumiendo que `HistorialPagos.Monto`
+es positivo para un pago real ("debía $500, pagó $600"). Es al revés:
+`app.negocio.pagos.registrar_pago` (su propio docstring) guarda
+`Monto` CON SIGNO — **negativo** para un pago recibido (resta de la
+cuenta, reduce lo que debe) y **positivo** para un cargo/ajuste (suma,
+aumenta lo que debe); confirmado también en la GUI de "Registrar
+pagos" (`nuevo_saldo = saldo_total + monto`, un monto negativo hace
+bajar el saldo). La fórmula de la ronda anterior RESTABA `Pagado` (la
+suma de `Monto`) de `Liquidado`, así que un pago real (negativo) en vez
+de reducir el pendiente lo AUMENTABA — exactamente lo que mostraba la
+base real: cuanto más pagó un profesional, más alto salía su
+"pendiente". Verificado armando un script puntual contra la base real
+adjunta (`get_connection` + `calcular_estadisticas_principales`):
+reproducía el mismo $21.242.875 del cuadrito, y con la fórmula
+corregida (sumar en vez de restar) baja a $7.631.152 — ya por debajo
+del total liquidado, como corresponde.
+
+**Arreglo**: `_saldo_pendiente_periodo` pasa de `max(Liquidado -
+Pagado, 0)` a `max(Liquidado + Pagado, 0)` por profesional — sumar el
+NETO de los movimientos del período (no restarlo) es lo que corresponde
+al signo real: un pago real (negativo) sigue reduciendo el pendiente
+(ahora sí, al sumarlo), y un ajuste positivo (un cargo que aumenta la
+deuda del período) ahora SUMA al pendiente en vez de restarle, que es
+el comportamiento correcto para ese caso.
+
+Los dos tests de la ronda anterior que simulaban un pago con `Monto`
+POSITIVO (irreal — un pago real nunca se guarda así) se corrigen a
+`Monto` negativo, manteniendo el mismo resultado esperado en pesos
+(la fórmula corregida da el mismo número que la fórmula vieja daba con
+el signo vuelto al revés, así que los valores esperados de los tests
+no cambiaron, solo el signo de la entrada). Se suma un test nuevo para
+el caso de un ajuste positivo (debía cubrir el caso que la ronda
+anterior no contemplaba: un cargo, no un pago, imputado al período).
+
+Tests: `tests/test_panel_control.py` (signo corregido en los dos tests
+de saldo pendiente existentes — `Monto=-4000`/`Monto=-600` en vez de
+positivo —, +1 nuevo:
+`test_estadisticas_principales_saldo_pendiente_un_ajuste_positivo_
+suma_deuda_del_periodo`); `tests/test_gui_balance.py` (+2: `test_
+gastos_tabla_ordenable_por_click_en_encabezado`, `test_gastos_f5_
+tambien_reinicia_el_orden`; reescrito el test de ancho a la cascada
+×1.3×1.25). Suite: 33 + 38 passed, más 168 passed en la corrida
+conjunta con `test_balance.py`/`test_gastos_operativos.py`/`test_
+gui_panel_control.py`. pyflakes limpio en `app/gui/pantallas/
+balance.py`, `app/negocio/panel_control.py` y los tres archivos de
+test tocados. Verificado además contra la base de datos real adjunta
+por la clienta (`espacio_ramos.db`) que el número final del cuadrito
+queda por debajo del total liquidado, como corresponde.
+
