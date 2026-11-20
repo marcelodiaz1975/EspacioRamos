@@ -173,6 +173,15 @@ CREATE TABLE IF NOT EXISTS Profesional (
     -- profesional (ver `_tabla_bloques_horarios`, `app/pdf/
     -- liquidacion_pdf.py`).
     OcultarHoraLiberacionPdf INTEGER NOT NULL DEFAULT 0,
+    -- Pedido explícito de la clienta: "que me saque de las condiciones
+    -- que se imprimen en el PDF de las liquidaciones lo que aclara en
+    -- los puntos referidos a 'Vacaciones' (3), Licencia por maternidad
+    -- (11), Licencia por matrimonio (12)" — default 0 (los 21 puntos
+    -- de Condiciones y normas se ven completos, como siempre), 1 omite
+    -- esos tres puntos SOLO para este profesional y renumera el resto
+    -- desde 1 sin saltear ningún número (ver `condiciones_normas`,
+    -- `app/pdf/valores_pdf.py`).
+    OcultarCondicionesVacacionesLicenciasPdf INTEGER NOT NULL DEFAULT 0,
     CampoLibre1 TEXT,
     CampoLibre2 TEXT,
     CampoLibre3 TEXT

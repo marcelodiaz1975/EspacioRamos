@@ -166,12 +166,35 @@ def bloques_esquema_descuentos(conn: sqlite3.Connection, ancho: float) -> list:
     return story
 
 
-def condiciones_normas(conn: sqlite3.Connection) -> list:
+# Números reales (CondicionNorma.Numero) de "Vacaciones"/"Licencia por
+# maternidad"/"Licencia por matrimonio" — pedido explícito de la
+# clienta, `Profesional.OcultarCondicionesVacacionesLicenciasPdf`.
+_NUMEROS_CONDICIONES_VACACIONES_LICENCIAS = {3, 11, 12}
+
+
+def condiciones_normas(conn: sqlite3.Connection, excluir_vacaciones_licencias: bool = False) -> list:
     """Los 21 puntos editables de "Condiciones y normas" (CondicionNorma),
-    numerados "N) TÍTULO:" en mayúsculas (PDF de Liquidación)."""
+    numerados "N) TÍTULO:" en mayúsculas (PDF de Liquidación).
+
+    `excluir_vacaciones_licencias` (pedido explícito de la clienta, ver
+    `Profesional.OcultarCondicionesVacacionesLicenciasPdf`): sin
+    marcar, comportamiento de siempre, cada punto numerado con su
+    `Numero` real tal cual está en la base (puede tener huecos si algún
+    punto está inactivo). Marcado, se omiten los puntos de "Vacaciones"
+    (3)/"Licencia por maternidad" (11)/"Licencia por matrimonio" (12) y
+    el RESTO se renumera de manera secuencial desde 1, sin saltear
+    ningún número — "el resto igual, renumerado desde 1 en adelante sin
+    saltear ningún número, lo único que omite son los puntos que te
+    enumeré recién"."""
     condiciones = conn.execute("SELECT * FROM CondicionNorma WHERE Activo = 1 ORDER BY Numero").fetchall()
+    if excluir_vacaciones_licencias:
+        condiciones = [c for c in condiciones if c["Numero"] not in _NUMEROS_CONDICIONES_VACACIONES_LICENCIAS]
     style = estilo_texto(9)
-    return [Paragraph(f"<b>{c['Numero']}) {c['Titulo'].upper()}:</b> {c['Texto']}", style) for c in condiciones]
+    story = []
+    for indice, c in enumerate(condiciones, start=1):
+        numero = indice if excluir_vacaciones_licencias else c["Numero"]
+        story.append(Paragraph(f"<b>{numero}) {c['Titulo'].upper()}:</b> {c['Texto']}", style))
+    return story
 
 
 def condiciones_forma_reserva(conn: sqlite3.Connection) -> list:

@@ -286,6 +286,19 @@ def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
         # liquidación SOLO para este profesional (ver `_tabla_bloques_
         # horarios`, `app/pdf/liquidacion_pdf.py`).
         Campo("OcultarHoraLiberacionPdf", "Ocultar hora de liberación en el PDF", tipo="booleano"),
+        # Pedido explícito de la clienta: "que me saque de las
+        # condiciones que se imprimen en el PDF de las liquidaciones lo
+        # que aclara en los puntos referidos a 'Vacaciones' (3),
+        # Licencia por maternidad (11), Licencia por matrimonio (12)...
+        # el resto igual, renumerado desde 1 en adelante sin saltear
+        # ningún número" — default sin marcar (se ven los 21 puntos
+        # completos, como siempre), marcado omite esos tres puntos y
+        # renumera el resto SOLO para este profesional (ver
+        # `condiciones_normas`, `app/pdf/valores_pdf.py`).
+        Campo(
+            "OcultarCondicionesVacacionesLicenciasPdf",
+            "Ocultar condiciones de Vacaciones/Licencias en el PDF", tipo="booleano",
+        ),
         *campos_libres(conn),
     ]
 

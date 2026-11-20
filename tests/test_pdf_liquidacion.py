@@ -397,6 +397,30 @@ def test_condiciones_y_normas_sembradas_aparecen(conn, profesional, tmp_path):
     assert "CONFORMIDAD Y CUMPLIMIENTO" in texto.upper()
 
 
+def test_pdf_liquidacion_omite_condiciones_de_vacaciones_licencias_si_el_profesional_lo_tiene_tildado(
+    conn, profesional, tmp_path,
+):
+    obtener_repositorio(conn, "Profesional").actualizar(profesional, OcultarCondicionesVacacionesLicenciasPdf=1)
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta).upper()
+    assert "VACACIONES" not in texto
+    assert "LICENCIA POR MATERNIDAD" not in texto
+    assert "LICENCIA POR MATRIMONIO" not in texto
+    # El resto de las condiciones sigue, solo que renumerado.
+    assert "FORMA DE PAGO" in texto
+    assert "CONFORMIDAD Y CUMPLIMIENTO" in texto
+
+
+def test_pdf_liquidacion_muestra_las_condiciones_de_vacaciones_licencias_por_defecto(conn, profesional, tmp_path):
+    liquidacion = calcular_liquidacion(conn, id_profesional=profesional, periodo=PERIODO)
+    ruta = generar_pdf_liquidacion(conn, liquidacion, str(tmp_path))
+    texto = _texto_pdf(ruta).upper()
+    assert "VACACIONES" in texto
+    assert "LICENCIA POR MATERNIDAD" in texto
+    assert "LICENCIA POR MATRIMONIO" in texto
+
+
 def test_decimales_configurados_en_0_no_muestra_centavos(conn, profesional, tmp_path):
     from app.negocio.formato import formatear_moneda
 

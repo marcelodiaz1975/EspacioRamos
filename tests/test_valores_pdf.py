@@ -9,6 +9,7 @@ from app.pdf.valores_pdf import (
     _hasta_por_frecuencia,
     _sustituciones_detalles_complementarios,
     bloques_esquema_descuentos,
+    condiciones_normas,
     matriz_valores_edificio,
     rango_actualizacion,
 )
@@ -153,3 +154,47 @@ def test_matriz_valores_ordena_unidades_por_piso_y_letra(conn):
     [tabla] = matriz_valores_edificio(conn, id_edificio, ancho=500)
     unidades = [fila[0] for fila in tabla._cellvalues[1:]]
     assert unidades == ['EP "K"', '7mo "L"', '9no "C"', '15 "H"']
+
+
+def test_condiciones_normas_sin_excluir_usa_el_numero_real_con_huecos(conn):
+    """Comportamiento de siempre (checkbox destildado): cada punto se
+    numera con su `Numero` real de la base, no una posición secuencial
+    — si un punto queda inactivo, el resto conserva su número real."""
+    obtener_repositorio(conn, "CondicionNorma").actualizar(11, Activo=0)
+    flowables = condiciones_normas(conn)
+    numeros = [f.text.split(")")[0].replace("<b>", "") for f in flowables]
+    assert "11" not in numeros
+    assert "12" in numeros  # el siguiente activo conserva SU número real, no se corre
+
+
+def test_condiciones_normas_excluyendo_vacaciones_licencias_omite_los_tres_puntos(conn):
+    """Pedido explícito de la clienta: tildado, se omiten "Vacaciones"
+    (3), "Licencia por maternidad" (11) y "Licencia por matrimonio"
+    (12)."""
+    flowables = condiciones_normas(conn, excluir_vacaciones_licencias=True)
+    textos = [f.text for f in flowables]
+    assert not any("VACACIONES" in t for t in textos)
+    assert not any("LICENCIA POR MATERNIDAD" in t for t in textos)
+    assert not any("LICENCIA POR MATRIMONIO" in t for t in textos)
+
+
+def test_condiciones_normas_excluyendo_vacaciones_licencias_renumera_sin_saltear(conn):
+    """"El resto igual, renumerado desde 1 en adelante sin saltear
+    ningún número" — con 21 puntos sembrados y 3 excluidos quedan 18,
+    numerados 1..18 sin huecos."""
+    flowables = condiciones_normas(conn, excluir_vacaciones_licencias=True)
+    numeros = [int(f.text.split(")")[0].replace("<b>", "")) for f in flowables]
+    assert numeros == list(range(1, len(numeros) + 1))
+    assert len(numeros) == 18  # 21 sembrados - 3 excluidos
+
+
+def test_condiciones_normas_sin_vacaciones_licencias_no_cambia_el_texto_de_los_que_quedan(conn):
+    """El contenido de los puntos que SÍ quedan no se toca — solo
+    cambia a qué número le toca a cada uno. "Forma de pago" es el
+    punto 1 en los dos casos (nada excluido va antes), así que su
+    texto completo tiene que salir idéntico."""
+    [primero_sin_excluir] = [f.text for f in condiciones_normas(conn) if "FORMA DE PAGO" in f.text]
+    [primero_con_excluir] = [
+        f.text for f in condiciones_normas(conn, excluir_vacaciones_licencias=True) if "FORMA DE PAGO" in f.text
+    ]
+    assert primero_con_excluir == primero_sin_excluir

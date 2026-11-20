@@ -733,7 +733,9 @@ def generar_pdf_liquidacion(conn: sqlite3.Connection, liquidacion: Liquidacion, 
         # distintos `doc.build()` — si `construir_sin_saltos` reintenta con
         # más alto, este closure se vuelve a llamar entero, así que todo
         # (incluidas las condiciones) se arma de cero acá adentro.
-        condiciones_flowables = condiciones_normas(conn)
+        condiciones_flowables = condiciones_normas(
+            conn, excluir_vacaciones_licencias=bool(profesional["OcultarCondicionesVacacionesLicenciasPdf"]),
+        )
         story = []
 
         # Logo centrado (o el nombre del espacio si no hay uno configurado)
