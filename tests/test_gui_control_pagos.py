@@ -878,8 +878,8 @@ def test_etiquetas_expensas_y_saldos_bancarios_muestran_los_valores_de_saldos_ex
     panel.actualizar()
 
     assert panel.etiqueta_total_expensas.text() == f"Total expensas sin abonar: {formatear_moneda(5000.0)}"
-    assert panel.etiqueta_saldo_patagonia.text() == f"Saldo a cubrir en CA Bco Patagonia: {formatear_moneda(5000.0)}"
-    assert panel.etiqueta_saldo_provincia.text() == f"Saldo a cubrir en CA Bco Provincia: {formatear_moneda(0.0)}"
+    assert panel.etiqueta_saldo_patagonia.text() == f"Saldo a cubrir Bco Patagonia: {formatear_moneda(5000.0)}"
+    assert panel.etiqueta_saldo_provincia.text() == f"Saldo a cubrir Bco Provincia: {formatear_moneda(0.0)}"
     assert panel.etiqueta_saldo_hipotecario.text() == f"Saldo a cubrir Bco Hipotecario: {formatear_moneda(0.0)}"
     assert panel.etiqueta_saldo_macro.text() == f"Saldo a cubrir Bco Macro: {formatear_moneda(0.0)}"
 

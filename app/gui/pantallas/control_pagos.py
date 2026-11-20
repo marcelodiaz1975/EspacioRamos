@@ -654,7 +654,7 @@ class _PanelCargaControl(QWidget):
             self.etiqueta_total_expensas, self.etiqueta_saldo_patagonia, self.etiqueta_saldo_provincia,
             self.etiqueta_saldo_hipotecario, self.etiqueta_saldo_macro,
         ):
-            # Texto largo ("Saldo a cubrir en CA Bco Patagonia: $...") —
+            # Texto largo ("Saldo a cubrir Bco Patagonia: $...") —
             # sin esto, una columna del `QHBoxLayout` de 4 columnas con
             # `stretch=1` cada una terminaba más ancha que las otras
             # tres para no cortar el texto.
@@ -1056,10 +1056,10 @@ class _PanelCargaControl(QWidget):
             f"Total expensas sin abonar: {formatear_moneda(resumen['total_expensas_sin_abonar'])}"
         )
         self.etiqueta_saldo_patagonia.setText(
-            f"Saldo a cubrir en CA Bco Patagonia: {formatear_moneda(resumen['CA Bco Patagonia'])}"
+            f"Saldo a cubrir Bco Patagonia: {formatear_moneda(resumen['CA Bco Patagonia'])}"
         )
         self.etiqueta_saldo_provincia.setText(
-            f"Saldo a cubrir en CA Bco Provincia: {formatear_moneda(resumen['CA Bco Provincia'])}"
+            f"Saldo a cubrir Bco Provincia: {formatear_moneda(resumen['CA Bco Provincia'])}"
         )
         self.etiqueta_saldo_hipotecario.setText(
             f"Saldo a cubrir Bco Hipotecario: {formatear_moneda(resumen['CA Bco Hipotecario'])}"

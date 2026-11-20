@@ -67,6 +67,7 @@ from app.gui.pantallas.reservas import _opciones_profesional
 from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.negocio.listas_editables import opciones_lista
+from app.negocio.llaves import deposito_juego_llaves, promedio_valor_llave
 from app.negocio.mensajes import sustituir_variables
 from app.repositorio.registro import obtener_repositorio
 
@@ -95,6 +96,17 @@ def _ancho_necesario_combo(combo: QComboBox) -> int:
     metrica = QFontMetrics(combo.font())
     ancho_texto = max((metrica.horizontalAdvance(combo.itemText(i)) for i in range(combo.count())), default=0)
     return ancho_texto + _COLCHON_COMBO
+
+
+def _moneda_mensaje(monto: float) -> str:
+    """Mismo criterio que `app.negocio.mensajes._moneda` (duplicado acá,
+    sin relación de dependencia con ese módulo, es privado): "DC-03
+    reglas generales: punto como separador de miles, SIN decimales, sin
+    espacio entre '$' y el número (ej. '$4.330')" — formato de mensaje
+    de texto, distinto del de tabla/PDF (`app.negocio.formato.
+    formatear_moneda`, que usa "$ " con espacio y decimales)."""
+    texto = f"{abs(monto):,.0f}".replace(",", ".")
+    return f"-${texto}" if monto < 0 else f"${texto}"
 
 
 def _nombre_espacio(conn: sqlite3.Connection) -> str:
@@ -262,6 +274,15 @@ _VARIABLES_MENSAJE = {
         "Nombre del responsable agendado como \"Administrador principal\" con \"Contacto principal\" en "
         "Sí (Base de datos del espacio / Responsables)."
     ),
+    "promedio_valor_llave_edificio": (
+        "Promedio del valor de depósito de las llaves de Edificio activas, redondeado arriba en múltiplos de 100."
+    ),
+    "promedio_valor_llave_unidad": (
+        "Promedio del valor de depósito de las llaves de Unidad activas, redondeado arriba en múltiplos de 100."
+    ),
+    "deposito_juego_llaves": (
+        "Suma de los dos promedios anteriores: lo que vale un juego completo (llave de edificio + llave de unidad)."
+    ),
 }
 """Catálogo único de variables ofrecidas en el diálogo Nuevo/Editar
 (hallazgo #24 de la auditoría) — mismo dict que alimenta la fila de
@@ -401,6 +422,24 @@ class _PanelMensajesPredefinidos(QWidget):
         self.crud.tabla_widget.itemSelectionChanged.connect(self._actualizar_vista_previa)
         layout.addWidget(self.crud, stretch=1)
 
+        # Pedido explícito de la clienta: "los mensajes predefinidos que
+        # estén ordenados por categoría primero, y luego por
+        # descripción" — el orden que trae `self.repositorio.listar()`
+        # (inserción/rowid, sin este envoltorio) pasa a ser siempre
+        # (Categoría, Descripción) antes de que `PantallaCRUD.actualizar`
+        # haga lo suyo. `sorted` es estable, así que un click en otra
+        # columna (`self._orden.columna`, ver `OrdenTabla`) sigue
+        # ordenando por esa columna normalmente — este orden de base
+        # solo decide el desempate entre filas iguales en esa columna,
+        # en vez del orden de inserción de antes.
+        listar_original = self.crud.repositorio.listar
+
+        def _listar_por_categoria_y_descripcion(**filtros):
+            registros = listar_original(**filtros)
+            return sorted(registros, key=lambda r: (r["Categoria"] or "", r["Descripcion"] or ""))
+
+        self.crud.repositorio.listar = _listar_por_categoria_y_descripcion
+
         actualizar_original = self.crud.actualizar
 
         def _actualizar_con_filtro():
@@ -451,9 +490,21 @@ class _PanelMensajesPredefinidos(QWidget):
         reportado por la clienta: un profesional recién creado no
         aparecía en "Dirigido a" hasta reiniciar TODO el sistema —
         `_cargar_combo_dirigido_a` lo repuebla acá también, preservando
-        la selección vigente."""
+        la selección vigente.
+
+        Pedido explícito de la clienta ("F5 refresca a valores
+        iniciales"): los cinco selectores de contexto (Dirigido a,
+        Localidad/Edificio/Unidad/Consultorio) también vuelven a su
+        valor "general" en blanco — antes F5 no los tocaba, a
+        diferencia del resto del sistema (CLAUDE.md, "F5... reinicia
+        desde cero")."""
         self._cargar_combo_dirigido_a()
         self.combo_filtro.setCurrentIndex(0)
+        self.combo_dirigido_a.setCurrentIndex(0)
+        self.combo_localidad_contexto.setCurrentIndex(0)
+        self.combo_edificio_contexto.setCurrentIndex(0)
+        self.combo_unidad_contexto.setCurrentIndex(0)
+        self.combo_consultorio_contexto.setCurrentIndex(0)
         self.crud.reiniciar()
         self.crud.campo_buscar.setFocus()
 
@@ -532,6 +583,9 @@ class _PanelMensajesPredefinidos(QWidget):
         variables.update(self._variables_profesional_dirigido_a())
         variables["nombre_espacio"] = _nombre_espacio(self.conn)
         variables["nombre_administrador_principal"] = _nombre_administrador_principal(self.conn)
+        variables["promedio_valor_llave_edificio"] = _moneda_mensaje(promedio_valor_llave(self.conn, "Edificio"))
+        variables["promedio_valor_llave_unidad"] = _moneda_mensaje(promedio_valor_llave(self.conn, "Unidad"))
+        variables["deposito_juego_llaves"] = _moneda_mensaje(deposito_juego_llaves(self.conn))
         self.texto_vista_previa.setPlainText(sustituir_variables(mensaje["Mensaje"] or "", variables))
 
     def _variables_profesional_dirigido_a(self) -> dict[str, str]:

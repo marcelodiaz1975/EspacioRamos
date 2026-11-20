@@ -571,19 +571,21 @@ def test_tarjeta_estadisticas_principales_muestra_las_lineas_de_las_tres_seccion
         assert etiqueta in texto
 
 
-def test_tarjeta_estadisticas_principales_tres_subtitulos_en_itálica_subrayados_y_en_orden(qtbot, conn):
-    """Pedido explícito de la clienta: tres subtítulos en itálica Y
-    SUBRAYADOS ("Liquidaciones mes en curso" / "Resultado del negocio" /
-    "Monto a cobrar en el mes en curso"), en ese orden — a diferencia de
-    los totales de cada sección, que son itálica SIN subrayar (ver
-    `test_tarjeta_estadisticas_principales_los_tres_totales_van_en_
-    italica_sin_subrayar`)."""
+def test_tarjeta_estadisticas_principales_tres_subtitulos_en_negrita_y_en_orden(qtbot, conn):
+    """Pedido explícito de la clienta (corrección de la ronda anterior,
+    que los tenía en itálica + subrayado): "sacá la itálica de los
+    subtítulos y los subtotales del cuadro largo, sacá los subrayados
+    también, que tanto los subtítulos estén en negrita y los subtotales
+    con los importes también" — tres subtítulos en NEGRITA a secas
+    ("Liquidaciones mes en curso" / "Resultado del negocio" / "Monto a
+    cobrar en el mes en curso"), en ese orden."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     tarjeta = _tarjeta_de(pantalla.panel_avance.etiqueta_total_liquidado)
     subtitulos = [
         e for e in tarjeta.findChildren(QLabel)
-        if e.styleSheet() == "font-style: italic; text-decoration: underline;"
+        if e.styleSheet() == "font-weight: bold;"
+        and e.text() in ("Liquidaciones mes en curso", "Resultado del negocio", "Monto a cobrar en el mes en curso")
     ]
     assert [e.text() for e in subtitulos] == [
         "Liquidaciones mes en curso", "Resultado del negocio", "Monto a cobrar en el mes en curso",
@@ -623,18 +625,18 @@ def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, con
     assert posiciones == sorted(posiciones)
 
 
-def test_tarjeta_estadisticas_principales_los_tres_totales_van_en_italica_sin_subrayar(qtbot, conn):
+def test_tarjeta_estadisticas_principales_los_tres_totales_van_en_negrita(qtbot, conn):
     """Pedido explícito de la clienta (corrección de la ronda anterior,
-    donde quedaban en negrita): los tres totales pasan a itálica SIN
-    subrayar, sin negrita — el subrayado queda reservado a los
-    subtítulos de cada sección."""
+    donde quedaban en itálica sin subrayar): "los subtotales con los
+    importes también" en negrita — sin itálica ni subrayado, mismo
+    estilo que los subtítulos de cada sección."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_avance
     for etiqueta in (
         panel.etiqueta_total_liquidado, panel.etiqueta_balance_negocio, panel.etiqueta_monto_restante_a_cobrar,
     ):
-        assert etiqueta.styleSheet() == "font-style: italic;"
+        assert etiqueta.styleSheet() == "font-weight: bold;"
 
 
 def test_tarjeta_profesionales_muestra_los_cuatro_conceptos_nuevos(qtbot, conn):

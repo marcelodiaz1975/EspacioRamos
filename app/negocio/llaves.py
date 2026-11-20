@@ -41,6 +41,7 @@ haciéndose abrir por otro profesional presente), solo informa.
 from __future__ import annotations
 
 import sqlite3
+from math import ceil
 
 from app.negocio.dias import fecha_actual, periodo_actual
 from app.negocio.pagos import crear_cargo_especial
@@ -58,6 +59,40 @@ def texto_estado_deposito(deposito_cobrado: bool) -> str:
     la columna "Depósito" de "Stock de llaves por profesional") y en la
     planilla de importación."""
     return "Abonado" if deposito_cobrado else "Bonificado"
+
+
+def _promedio_redondeado_arriba(valores: list[float]) -> float:
+    """Promedio simple de `valores`, redondeado ARRIBA al múltiplo de
+    100 más cercano, sin centavos (pedido explícito de la clienta sobre
+    las variables de Mensajes predefinidos que lo usan: "en el caso de
+    que haya valores distintos, se promedia y se pone un valor
+    redondeando para arriba en múltiplos de 100"). 0 si la lista viene
+    vacía (nada que promediar)."""
+    if not valores:
+        return 0.0
+    return ceil((sum(valores) / len(valores)) / 100) * 100
+
+
+def promedio_valor_llave(conn: sqlite3.Connection, tipo: str) -> float:
+    """Promedio redondeado (ver `_promedio_redondeado_arriba`) del
+    `ValorDepositoActual` de las llaves ACTIVAS de un `Tipo` puntual
+    ("Edificio"/"Unidad") — variables {promedio_valor_llave_edificio}/
+    {promedio_valor_llave_unidad} de Mensajes predefinidos. Sin
+    distinción de localidad/edificio puntual (promedio GLOBAL de todo
+    el espacio), mismo alcance que el resto de las variables fijas de
+    esa pantalla (`nombre_espacio`, `nombre_administrador_principal`)."""
+    valores = [f["ValorDepositoActual"] for f in obtener_repositorio(conn, "Llave").listar(Tipo=tipo, Activo=1)]
+    return _promedio_redondeado_arriba(valores)
+
+
+def deposito_juego_llaves(conn: sqlite3.Connection) -> float:
+    """Variable {deposito_juego_llaves} de Mensajes predefinidos: "es el
+    valor de la única del edificio mas el promedio del valor de las
+    llaves de las unidades" — suma de los dos promedios de arriba (cada
+    uno ya redondeado por separado, mismo criterio que pidió la
+    clienta: "{promedio valor llave edificio} y {promedio valor llave
+    unidad} con el mismo criterio que el punto anterior")."""
+    return promedio_valor_llave(conn, "Edificio") + promedio_valor_llave(conn, "Unidad")
 
 
 def siguiente_nombre_llave(conn: sqlite3.Connection, tipo: str, *, id_edificio: int | None = None) -> str:

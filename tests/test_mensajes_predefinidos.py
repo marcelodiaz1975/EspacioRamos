@@ -298,6 +298,7 @@ def test_campo_mensaje_suma_variables_al_diccionario_de_campo(qtbot, conn):
     assert set(campo_mensaje.variables) == {
         "apodo", "nombre", "apellido", "tratamiento", "edificio", "unidad", "consultorio", "localidad",
         "nombre_espacio", "nombre_administrador_principal",
+        "promedio_valor_llave_edificio", "promedio_valor_llave_unidad", "deposito_juego_llaves",
     }
 
 
@@ -326,10 +327,14 @@ def test_dialogo_suma_un_boton_por_variable_que_inserta_en_el_cursor(qtbot, conn
     assert entrada.toPlainText() == "Hola, {apodo}{localidad}"
 
 
-def test_dialogo_nuevo_tiene_10_variables_en_grilla_de_2x5(qtbot, conn):
+def test_dialogo_nuevo_tiene_13_variables_en_grilla_de_5_columnas(qtbot, conn):
     """Pedido explícito de la clienta al sumar {nombre_administrador_
-    principal}: "ahora que son [10] variables ponelas en dos filas de 5
-    botones" (antes 3x3 con 9)."""
+    principal} (grid 2x5 con 10 variables, ronda anterior): la grilla
+    de botones de variables sigue en 5 columnas fijas (`_COLUMNAS_
+    BOTONES_VARIABLES`, `crud_generico.py`) — con las 3 variables de
+    llaves sumadas en esta ronda (13 en total) pasa a 3 filas (2
+    completas de 5 + una de 3), sin que haga falta tocar ningún
+    número fijo: la grilla ya era genérica para cualquier cantidad."""
     from PySide6.QtWidgets import QGridLayout
 
     pantalla = _PanelMensajesPredefinidos(conn)
@@ -338,9 +343,9 @@ def test_dialogo_nuevo_tiene_10_variables_en_grilla_de_2x5(qtbot, conn):
     qtbot.addWidget(dialogo)
 
     botones_variable = [b for b in dialogo.findChildren(QPushButton) if b.text().startswith("{")]
-    assert len(botones_variable) == 10
-    grilla = next(g for g in dialogo.findChildren(QGridLayout) if g.count() == 10)
-    assert grilla.rowCount() == 2
+    assert len(botones_variable) == 13
+    grilla = next(g for g in dialogo.findChildren(QGridLayout) if g.count() == 13)
+    assert grilla.rowCount() == 3
     assert grilla.columnCount() == 5
 
 
@@ -389,6 +394,109 @@ def test_vista_previa_sin_administrador_principal_configurado_queda_en_blanco(qt
     qtbot.addWidget(pantalla)
     pantalla.crud.tabla_widget.selectRow(0)
     assert pantalla.texto_vista_previa.toPlainText() == "Hola de parte de ."
+
+
+def test_vista_previa_sustituye_promedio_valor_llave_edificio_y_unidad(qtbot, conn):
+    """Pedido explícito de la clienta: nuevas variables {promedio_valor_
+    llave_edificio}/{promedio_valor_llave_unidad} — ejemplo textual: una
+    llave de Edificio en $8000 (promedio de una sola, queda igual) y
+    cuatro llaves de Unidad en $6000 cada una (promedio $6000, ya
+    múltiplo de 100 — no cambia al redondear)."""
+    obtener_repositorio(conn, "Llave").crear(Nombre="Llave edificio", Tipo="Edificio", ValorDepositoActual=8000)
+    for _ in range(4):
+        obtener_repositorio(conn, "Llave").crear(Nombre="Llave unidad", Tipo="Unidad", ValorDepositoActual=6000)
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Prueba",
+        Mensaje="Edificio: {promedio_valor_llave_edificio}. Unidad: {promedio_valor_llave_unidad}.",
+        Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.tabla_widget.selectRow(0)
+    assert pantalla.texto_vista_previa.toPlainText() == "Edificio: $8.000. Unidad: $6.000."
+
+
+def test_vista_previa_sustituye_deposito_juego_llaves_suma_los_dos_promedios(qtbot, conn):
+    """{deposito_juego_llaves} = {promedio_valor_llave_edificio} +
+    {promedio_valor_llave_unidad} — mismo ejemplo textual de la clienta
+    ($8000 + $6000 = $14000)."""
+    obtener_repositorio(conn, "Llave").crear(Nombre="Llave edificio", Tipo="Edificio", ValorDepositoActual=8000)
+    for _ in range(4):
+        obtener_repositorio(conn, "Llave").crear(Nombre="Llave unidad", Tipo="Unidad", ValorDepositoActual=6000)
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Prueba", Mensaje="Depósito del juego: {deposito_juego_llaves}.", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.tabla_widget.selectRow(0)
+    assert pantalla.texto_vista_previa.toPlainText() == "Depósito del juego: $14.000."
+
+
+def test_promedio_valor_llave_redondea_arriba_en_multiplos_de_100_si_los_valores_difieren(qtbot, conn):
+    """Pedido explícito de la clienta: "en el caso de que haya valores
+    distintos, se promedia y se pone un valor redondeando para arriba
+    en múltiplos de 100" — tres llaves de Unidad en 6000/6000/7000,
+    promedio real 6333,33 → redondea arriba a 6400."""
+    for valor in (6000, 6000, 7000):
+        obtener_repositorio(conn, "Llave").crear(Nombre="Llave unidad", Tipo="Unidad", ValorDepositoActual=valor)
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Prueba", Mensaje="Unidad: {promedio_valor_llave_unidad}.", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.tabla_widget.selectRow(0)
+    assert pantalla.texto_vista_previa.toPlainText() == "Unidad: $6.400."
+
+
+def test_promedio_valor_llave_ignora_llaves_inactivas(qtbot, conn):
+    obtener_repositorio(conn, "Llave").crear(Nombre="Llave activa", Tipo="Unidad", ValorDepositoActual=6000, Activo=1)
+    obtener_repositorio(conn, "Llave").crear(
+        Nombre="Llave de baja", Tipo="Unidad", ValorDepositoActual=600000, Activo=0,
+    )
+    obtener_repositorio(conn, "MensajePredefinido").crear(
+        Categoria="Prueba", Mensaje="Unidad: {promedio_valor_llave_unidad}.", Activo=1,
+    )
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.crud.tabla_widget.selectRow(0)
+    assert pantalla.texto_vista_previa.toPlainText() == "Unidad: $6.000."
+
+
+def test_tabla_ordenada_por_categoria_y_luego_descripcion_por_defecto(qtbot, conn):
+    """Pedido explícito de la clienta: "los mensajes predefinidos que
+    estén ordenados por categoría primero, y luego por descripción" —
+    el orden de FILAS por default (sin ningún click en un encabezado de
+    columna) deja de ser el de inserción/rowid."""
+    repo = obtener_repositorio(conn, "MensajePredefinido")
+    repo.crear(Categoria="Z", Descripcion="B", Mensaje="...", Activo=1)
+    repo.crear(Categoria="A", Descripcion="B", Mensaje="...", Activo=1)
+    repo.crear(Categoria="A", Descripcion="A", Mensaje="...", Activo=1)
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    tabla = pantalla.crud.tabla_widget
+    filas = [(tabla.item(f, 0).text(), tabla.item(f, 1).text()) for f in range(tabla.rowCount())]
+    assert filas == [("A", "A"), ("A", "B"), ("Z", "B")]
+
+
+def test_f5_reinicia_los_cinco_selectores_de_contexto_a_en_general(qtbot, conn):
+    """Pedido explícito de la clienta: "F5 refresca a valores
+    iniciales" — antes de esta ronda, F5 (`reiniciar()`) solo tocaba el
+    filtro de Categoría y la tabla, dejando "Dirigido a" y los cuatro
+    selectores de ubicación con lo que el operador hubiera elegido."""
+    id_consultorio = _crear_consultorio(conn)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Gómez")
+    pantalla = _PanelMensajesPredefinidos(conn)
+    qtbot.addWidget(pantalla)
+    pantalla.combo_dirigido_a.setCurrentIndex(pantalla.combo_dirigido_a.findData(id_profesional))
+    pantalla.combo_consultorio_contexto.setCurrentIndex(pantalla.combo_consultorio_contexto.findData(id_consultorio))
+
+    pantalla.reiniciar()
+
+    assert pantalla.combo_dirigido_a.currentIndex() == 0
+    assert pantalla.combo_localidad_contexto.currentIndex() == 0
+    assert pantalla.combo_edificio_contexto.currentIndex() == 0
+    assert pantalla.combo_unidad_contexto.currentIndex() == 0
+    assert pantalla.combo_consultorio_contexto.currentIndex() == 0
 
 
 def test_dialogo_nuevo_queda_al_doble_de_ancho_y_un_40_porciento_mas_alto_centrado_arriba(qtbot, conn):

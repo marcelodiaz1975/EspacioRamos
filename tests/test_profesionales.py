@@ -339,6 +339,35 @@ def test_fecha_contacto_ya_cargada_se_precarga_y_no_la_pisa_la_de_hoy(qtbot, con
     assert dialogo.valores()["FechaContacto"] == "2020-01-15"
 
 
+def test_fecha_nacimiento_calendario_arranca_en_el_anio_2000_en_un_alta_nueva(qtbot, conn):
+    """Pedido explícito de la clienta: "que el año arranque en el 2000
+    para a partir de ahí seleccionar la fecha de nacimiento del
+    profesional" — a diferencia de Fecha de contacto (`default_hoy`),
+    acá el campo SIGUE mostrando "(sin fecha)" hasta que se elige un
+    día (no se precarga ningún valor real); solo cambia a qué página
+    del calendario salta el popup al abrirse (`Campo.anio_calendario_
+    inicial`), para no tener que retroceder ~100 años desde 1900 a
+    mano."""
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    entrada = dialogo._entradas["FechaNacimiento"]
+    assert entrada.text() == "(sin fecha)"
+    assert entrada.calendarWidget().yearShown() == 2000
+    assert entrada.calendarWidget().monthShown() == 1
+
+
+def test_fecha_nacimiento_ya_cargada_no_salta_al_anio_2000(qtbot, conn):
+    id_prof = conn.execute(
+        "INSERT INTO Profesional (CategoriaProfesional, Apellido, FechaNacimiento) VALUES ('R', 'Gómez', '1985-06-20')"
+    ).lastrowid
+    conn.commit()
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    from PySide6.QtCore import QDate
+
+    assert dialogo._entradas["FechaNacimiento"].date() == QDate(1985, 6, 20)
+
+
 # ---------------------------------------------- cabeza de equipo: solo seleccionable para categoría E
 
 def test_cabeza_de_equipo_deshabilitado_por_defecto(qtbot, conn):

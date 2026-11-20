@@ -447,3 +447,118 @@ hasta ahora (sección propia con la ronda de trabajo); si esa sección queda
 "cerrada" y deja de aportar algo que otra pantalla necesite tener siempre
 a la vista, se puede migrar después al archivo que corresponda — no hace
 falta hacerlo en el momento.
+
+## Cuatro pedidos puntuales: Carga y control (etiquetas), Panel de control (negrita sin itálica), Profesionales (calendario de nacimiento), Mensajes predefinidos (variables de llaves + orden + F5)
+
+### Carga y control: etiquetas "Saldo a cubrir Bco {Nombre}"
+
+Pedido explícito de la clienta: "Saldo a cubrir en CA Bco Patagonia"/
+"...en CA Bco Provincia" pasan a "Saldo a cubrir Bco Patagonia"/"...Bco
+Provincia" — mismo formato que ya tenían Hipotecario/Macro, sin el "en
+CA" de más (`_actualizar_etiquetas_expensas_bancos`, `app/gui/
+pantallas/control_pagos.py`). Test actualizado: `test_etiquetas_
+expensas_y_saldos_bancarios_muestran_los_valores_de_saldos_expensas_y_
+bancos`.
+
+### Panel de control: subtítulos y subtotales en negrita, sin itálica ni subrayado
+
+Pedido explícito de la clienta sobre el cuadro largo "Estadísticas
+principales mes en curso": "sacá la itálica de los subtítulos y los
+subtotales del cuadro largo, sacá los subrayados también, que tanto
+los subtítulos estén en negrita y los subtotales con los importes
+también" — tercera vuelta de estilo de este mismo elemento (itálica
++subrayado → itálica sin subrayar en los totales → esta ronda, negrita
+a secas en los dos). `_subtitulo_italica` se renombra `_subtitulo_
+negrita` (`app/gui/pantallas/panel_control.py`, `font-weight: bold;`
+en vez de itálica+subrayado) y los tres `etiqueta_total_liquidado`/
+`etiqueta_balance_negocio`/`etiqueta_monto_restante_a_cobrar` pasan de
+`"font-style: italic;"` a `"font-weight: bold;"`. Tests reescritos:
+`test_tarjeta_estadisticas_principales_tres_subtitulos_en_negrita_y_en_
+orden`, `test_tarjeta_estadisticas_principales_los_tres_totales_van_en_
+negrita`.
+
+### Profesionales: calendario de Fecha de nacimiento arranca en el año 2000
+
+Pedido explícito de la clienta: "que el año arranque en el 2000 para a
+partir de ahí seleccionar la fecha de nacimiento del profesional" — sin
+tocar nada más del campo (sigue mostrando "(sin fecha)" hasta elegir un
+día, sigue vacío/opcional). `Campo` (`app/gui/crud_generico.py`) suma
+`anio_calendario_inicial: int | None`: para un campo `tipo="fecha"` sin
+valor cargado (ni `requerido` ni `default_hoy`), `_crear_entrada` llama
+`entrada.calendarWidget().setCurrentPage(anio, 1)` justo después de
+dejar la fecha en el sentinel "(sin fecha)" — reposiciona la página
+visible del popup del calendario SIN tocar el valor real (confirmado
+con un script puntual: `date()`/`text()` siguen en "(sin fecha)" después
+del `setCurrentPage`). Antes, el popup arrancaba en 1900 (`_FECHA_SIN_
+DATO` de `crud_generico.py`), bastante más lejos de una fecha de
+nacimiento típica que el 2000 pedido. `_campos_profesional`
+(`app/gui/pantallas/profesionales.py`) suma `anio_calendario_
+inicial=2000` al `Campo("FechaNacimiento", ...)` ya existente. Tests
+nuevos en `tests/test_profesionales.py`: `test_fecha_nacimiento_
+calendario_arranca_en_el_anio_2000_en_un_alta_nueva`, `test_fecha_
+nacimiento_ya_cargada_no_salta_al_anio_2000`.
+
+### Mensajes predefinidos: variables de depósito/promedio de llaves + orden por Categoría/Descripción + F5 reinicia los 5 selectores de contexto
+
+Tres pedidos puntuales de la clienta:
+
+- Tres variables nuevas, con el mismo criterio de redondeo:
+  `{promedio_valor_llave_edificio}`/`{promedio_valor_llave_unidad}`
+  (promedio del `ValorDepositoActual` de las llaves ACTIVAS de ese
+  Tipo, "redondeando para arriba en múltiplos de 100 sin centavos") y
+  `{deposito_juego_llaves}` (suma de los dos anteriores — "es el valor
+  de la única del edificio mas el promedio del valor de las llaves de
+  las unidades"). `promedio_valor_llave`/`_promedio_redondeado_arriba`/
+  `deposito_juego_llaves` nuevas en `app/negocio/llaves.py`; alcance
+  GLOBAL de todo el espacio, sin distinguir localidad/edificio puntual
+  (mismo criterio que `nombre_espacio`/`nombre_administrador_
+  principal`, las otras variables fijas de esta pantalla). Formato de
+  texto (`$14.000`, sin espacio ni decimales) vía `_moneda_mensaje`
+  nueva en `app/gui/pantallas/mensajes_predefinidos.py` — duplica a
+  propósito `app.negocio.mensajes._moneda` (privada, sin relación de
+  dependencia entre los dos módulos, mismo criterio que `_nombre_
+  espacio`/`_nombre_administrador_principal` ya duplicadas ahí), NO
+  `app.negocio.formato.formatear_moneda` (que usa "$ " con espacio y
+  decimales, formato de tabla/PDF, no de mensaje de texto). La grilla
+  de botones de variables (`_armar_fila_variables`, `crud_generico.py`)
+  ya era genérica en 5 columnas fijas — con las 13 variables totales
+  pasa sola a 3 filas (2 de 5 + una de 3), sin tocar ese mecanismo.
+- "Los mensajes predefinidos que estén ordenados por categoría primero,
+  y luego por descripción": el orden de FILAS por defecto (sin ningún
+  click en un encabezado) dejaba de ser el de inserción/rowid de
+  `self.repositorio.listar()`. Se envuelve esa instancia en
+  `_armar_ui` (mismo criterio ya usado ahí para envolver `self.crud.
+  actualizar`): `self.crud.repositorio.listar` pasa a ordenar siempre
+  por `(Categoria, Descripcion)` antes de que `PantallaCRUD.actualizar`
+  haga lo suyo — `sorted` es estable, así que un click en otra columna
+  (`OrdenTabla`) sigue funcionando normal, este orden de base solo
+  cambia el desempate entre filas iguales en esa columna.
+- "F5 refresca a valores iniciales": `reiniciar()` solo tocaba el
+  filtro de Categoría y la tabla — ahora también resetea los cinco
+  selectores de contexto (Dirigido a, Localidad/Edificio/Unidad/
+  Consultorio) a su valor "En general"/"Nadie en particular" (índice 0).
+  Alertas de éxito ("toda la solapa"): confirmado que Nuevo/Editar/
+  Eliminar YA las mostraban (mecanismo genérico de `PantallaCRUD`, sin
+  ninguna supresión en esta pantalla) — "Copiar mensaje" se deja sin
+  alerta, mismo criterio que TODO el resto del sistema para una copia
+  al portapapeles (Centro de mensajería, Reservas: ningún botón
+  "Copiar"/"Generar texto" muestra cartel).
+
+Tests: `tests/test_llaves.py` (+5: promedio de una sola llave, redondeo
+con valores distintos, sin ninguna llave, ignora inactivas, suma de
+los dos promedios). `tests/test_mensajes_predefinidos.py` (+7: las tres
+variables nuevas sustituidas en la vista previa incluido el redondeo y
+el filtro de inactivas, orden por defecto Categoría+Descripción, F5
+resetea los cinco selectores; 2 tests preexistentes actualizados de
+10 a 13 variables totales, y la grilla de 2x5 a 3 filas de 5 columnas).
+Suite conjunta de `test_llaves.py`/`test_mensajes_predefinidos.py`/
+`test_gui_control_pagos.py`/`test_gui_panel_control.py`/`test_panel_
+control.py`/`test_profesionales.py`/`test_mensajes.py`/`test_
+balance.py`: 399 passed, 1 failed — el fallo es el ya documentado de
+calibración de fuentes del sandbox en Profesionales (ver "Fallos
+conocidos del sandbox/contenedor" más arriba), ajeno a esta ronda.
+pyflakes limpio en los seis archivos de app/ tocados (`app/gui/
+pantallas/control_pagos.py`, `app/gui/pantallas/panel_control.py`,
+`app/gui/crud_generico.py`, `app/gui/pantallas/profesionales.py`,
+`app/negocio/llaves.py`, `app/gui/pantallas/mensajes_predefinidos.py`)
+y los cuatro de test.

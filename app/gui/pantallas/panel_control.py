@@ -216,15 +216,16 @@ def _linea_divisoria() -> QFrame:
     return linea
 
 
-def _subtitulo_italica(texto: str) -> QLabel:
+def _subtitulo_negrita(texto: str) -> QLabel:
     """Subtítulo de sección DENTRO de "Estadísticas principales mes en
     curso" (Nivel 2 suelto, mismo criterio que `subtituloSeccion` pero
-    sin negrita — acá la clienta pidió puntualmente itálica + subrayado,
-    para separar las tres cuentas del cuadro sin competir visualmente
-    con el título del cuadrito, que ya es itálica+negrita, ni con los
-    totales de cada cuenta, que son itálica SIN subrayar)."""
+    sin negrita habitualmente — acá la clienta pidió puntualmente
+    negrita a secas: primero itálica+subrayado, después itálica sin
+    subrayar en los totales, y finalmente (esta ronda) sacar toda
+    itálica/subrayado y dejar subtítulos Y subtotales en negrita, sin
+    más diferenciación entre ambos que el propio texto)."""
     etiqueta = QLabel(texto)
-    etiqueta.setStyleSheet("font-style: italic; text-decoration: underline;")
+    etiqueta.setStyleSheet("font-weight: bold;")
     return etiqueta
 
 
@@ -575,12 +576,13 @@ class _PanelAvancePeriodo(QWidget):
     def _armar_tarjeta_estadisticas_principales(self) -> QFrame:
         """Rediseño completo (ronda siguiente a la del punto 81), pedido
         explícito de la clienta — ya no es un solo bloque de texto, son
-        tres cuentas en cascada, cada una con su subtítulo en itálica Y
-        SUBRAYADO (`_subtitulo_italica`), las líneas que la componen,
-        una línea divisoria y el total en itálica SIN subrayar (pedido
-        explícito, ronda siguiente a la del diseño original: los
-        totales quedan en itálica, no en negrita, para no competir con
-        el subrayado del subtítulo) (ver `app.negocio.panel_control.
+        tres cuentas en cascada, cada una con su subtítulo (`_subtitulo_
+        negrita`), las líneas que la componen, una línea divisoria y el
+        total — subtítulos Y totales en NEGRITA a secas (pedido
+        explícito, ronda siguiente a la del diseño con itálica+subrayado:
+        "sacá la itálica... sacá los subrayados también, que tanto los
+        subtítulos estén en negrita y los subtotales con los importes
+        también") (ver `app.negocio.panel_control.
         EstadisticasPrincipales` para las fórmulas, derivadas exactamente
         de `Liquidacion.monto_generado` para que "Total liquidado mes en
         curso" cierre siempre con la suma real de las liquidaciones
@@ -605,35 +607,35 @@ class _PanelAvancePeriodo(QWidget):
 
         layout_contenido.addSpacing(12)
 
-        layout_contenido.addWidget(_subtitulo_italica("Liquidaciones mes en curso"))
+        layout_contenido.addWidget(_subtitulo_negrita("Liquidaciones mes en curso"))
         self.etiqueta_detalle_liquidaciones = QLabel()
         self.etiqueta_detalle_liquidaciones.setWordWrap(True)
         layout_contenido.addWidget(self.etiqueta_detalle_liquidaciones)
         layout_contenido.addWidget(_linea_divisoria())
         self.etiqueta_total_liquidado = QLabel()
-        self.etiqueta_total_liquidado.setStyleSheet("font-style: italic;")
+        self.etiqueta_total_liquidado.setStyleSheet("font-weight: bold;")
         layout_contenido.addWidget(self.etiqueta_total_liquidado)
 
         layout_contenido.addSpacing(12)
 
-        layout_contenido.addWidget(_subtitulo_italica("Resultado del negocio"))
+        layout_contenido.addWidget(_subtitulo_negrita("Resultado del negocio"))
         self.etiqueta_detalle_resultado = QLabel()
         self.etiqueta_detalle_resultado.setWordWrap(True)
         layout_contenido.addWidget(self.etiqueta_detalle_resultado)
         layout_contenido.addWidget(_linea_divisoria())
         self.etiqueta_balance_negocio = QLabel()
-        self.etiqueta_balance_negocio.setStyleSheet("font-style: italic;")
+        self.etiqueta_balance_negocio.setStyleSheet("font-weight: bold;")
         layout_contenido.addWidget(self.etiqueta_balance_negocio)
 
         layout_contenido.addSpacing(12)
 
-        layout_contenido.addWidget(_subtitulo_italica("Monto a cobrar en el mes en curso"))
+        layout_contenido.addWidget(_subtitulo_negrita("Monto a cobrar en el mes en curso"))
         self.etiqueta_detalle_cobro = QLabel()
         self.etiqueta_detalle_cobro.setWordWrap(True)
         layout_contenido.addWidget(self.etiqueta_detalle_cobro)
         layout_contenido.addWidget(_linea_divisoria())
         self.etiqueta_monto_restante_a_cobrar = QLabel()
-        self.etiqueta_monto_restante_a_cobrar.setStyleSheet("font-style: italic;")
+        self.etiqueta_monto_restante_a_cobrar.setStyleSheet("font-weight: bold;")
         layout_contenido.addWidget(self.etiqueta_monto_restante_a_cobrar)
 
         layout_contenido.addStretch()

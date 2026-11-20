@@ -185,6 +185,18 @@ class Campo:
     "hoy"). Sigue siendo editable/vaciable como cualquier campo fecha
     opcional (el sentinel "(sin fecha)" se instala igual, ver
     `_crear_entrada`) — solo cambia el valor con el que arranca."""
+    anio_calendario_inicial: int | None = None
+    """Solo para tipo="fecha" sin valor cargado (ni `requerido` ni
+    `default_hoy`, que ya fuerzan un valor real): el popup del
+    calendario arranca posicionado en este año en vez de arrastrar el
+    año de `_FECHA_SIN_DATO` (1900) — pedido puntual de Profesionales
+    para Fecha de nacimiento ("que el año arranque en el 2000 para a
+    partir de ahí seleccionar la fecha de nacimiento", en vez de tener
+    que retroceder a mano ~100 años desde 1900 cada vez). No cambia el
+    valor efectivamente guardado — el campo sigue mostrando "(sin
+    fecha)" hasta que el usuario elige un día (`QCalendarWidget.
+    setCurrentPage` solo reposiciona la página visible, ver
+    `_crear_entrada`)."""
     es_monto: bool = False
     """Solo para tipo="numero": se muestra en la tabla como moneda
     (`formatear_moneda`, con separador de miles), alineado a la derecha,
@@ -1048,6 +1060,8 @@ class _DialogoRegistro(QDialog):
                 entrada.setDate(QDate.currentDate())
             else:
                 entrada.setDate(_FECHA_SIN_DATO)
+                if campo.anio_calendario_inicial is not None:
+                    entrada.calendarWidget().setCurrentPage(campo.anio_calendario_inicial, 1)
             return entrada
         entrada = QLineEdit()
         if valor is not None:

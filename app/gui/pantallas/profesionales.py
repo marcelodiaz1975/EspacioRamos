@@ -230,8 +230,16 @@ def _campos_profesional(conn: sqlite3.Connection) -> list[Campo]:
         # por default — ver `Campo.formato_fecha`): pedido explícito de
         # la clienta, el día de la semana de un nacimiento no aporta
         # nada (a diferencia de una fecha operativa como Vigencia o
-        # Fecha de ausencia).
-        Campo("FechaNacimiento", "Fecha de nacimiento", tipo="fecha", formato_fecha="dd-MM-yyyy"),
+        # Fecha de ausencia). `anio_calendario_inicial=2000`: pedido
+        # explícito de la clienta, "que el año arranque en el 2000 para
+        # a partir de ahí seleccionar la fecha de nacimiento" — sin
+        # esto, el calendario arranca en 1900 (`_FECHA_SIN_DATO` de
+        # `crud_generico.py`), bastante más lejos de la fecha de
+        # nacimiento típica de un profesional.
+        Campo(
+            "FechaNacimiento", "Fecha de nacimiento", tipo="fecha", formato_fecha="dd-MM-yyyy",
+            anio_calendario_inicial=2000,
+        ),
         Campo("Domicilio", "Domicilio"),
         Campo("DomicilioLocalidad", "Localidad"),
         Campo("TelefonoParticular", "Teléfono particular"),

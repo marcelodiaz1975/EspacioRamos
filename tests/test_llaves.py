@@ -6,9 +6,11 @@ from app.negocio.llaves import (
     agregar_acceso_llave,
     asignar_llave,
     crear_llave,
+    deposito_juego_llaves,
     devolver_llave,
     ingresar_copias,
     llaves_faltantes_para_reserva,
+    promedio_valor_llave,
     registrar_perdida,
     resumen_stock,
     siguiente_nombre_llave,
@@ -37,6 +39,40 @@ def edificios(conn):
         repo.crear(Nombre="Ramos 1", Domicilio="Av. Rivadavia 1234", IdLocalidad=id_caba),
         repo.crear(Nombre="Ramos 2", Domicilio="Av. Rivadavia 5678", IdLocalidad=id_caba),
     )
+
+
+def test_promedio_valor_llave_una_sola_llave_da_su_propio_valor(conn):
+    obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Edificio", ValorDepositoActual=8000)
+    assert promedio_valor_llave(conn, "Edificio") == 8000
+
+
+def test_promedio_valor_llave_redondea_arriba_en_multiplos_de_100(conn):
+    """Pedido explícito de la clienta: "en el caso de que haya valores
+    distintos, se promedia y se pone un valor redondeando para arriba
+    en múltiplos de 100 sin centavos" — 6000/6000/7000 promedia
+    6333,33... y redondea arriba a 6400."""
+    for valor in (6000, 6000, 7000):
+        obtener_repositorio(conn, "Llave").crear(Nombre="Llave", Tipo="Unidad", ValorDepositoActual=valor)
+    assert promedio_valor_llave(conn, "Unidad") == 6400
+
+
+def test_promedio_valor_llave_sin_ninguna_da_cero(conn):
+    assert promedio_valor_llave(conn, "Edificio") == 0.0
+
+
+def test_promedio_valor_llave_ignora_inactivas(conn):
+    obtener_repositorio(conn, "Llave").crear(Nombre="Activa", Tipo="Unidad", ValorDepositoActual=6000, Activo=1)
+    obtener_repositorio(conn, "Llave").crear(Nombre="De baja", Tipo="Unidad", ValorDepositoActual=600000, Activo=0)
+    assert promedio_valor_llave(conn, "Unidad") == 6000
+
+
+def test_deposito_juego_llaves_suma_los_dos_promedios(conn):
+    """Ejemplo textual de la clienta: una llave de Edificio en $8000 y
+    cuatro llaves de Unidad en $6000 cada una → juego completo $14000."""
+    obtener_repositorio(conn, "Llave").crear(Nombre="Llave edificio", Tipo="Edificio", ValorDepositoActual=8000)
+    for _ in range(4):
+        obtener_repositorio(conn, "Llave").crear(Nombre="Llave unidad", Tipo="Unidad", ValorDepositoActual=6000)
+    assert deposito_juego_llaves(conn) == 14000
 
 
 def test_siguiente_nombre_llave_correlativo_por_letra(conn):
