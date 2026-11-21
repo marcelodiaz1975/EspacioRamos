@@ -229,6 +229,27 @@ def _subtitulo_negrita(texto: str) -> QLabel:
     return etiqueta
 
 
+def _seccion_estadisticas() -> tuple[QWidget, QVBoxLayout]:
+    """Pedido explícito de la clienta sobre "Estadísticas principales mes
+    en curso": "el fondo del contenido de todo el recuadro es todo gris,
+    separame las tres cuentas con un espacio en blanco finito aunque sea,
+    como el fondo del título del cuadro, para que las tres secciones
+    queden diferenciadas" — cada una de las tres cuentas (Liquidaciones/
+    Resultado del negocio/Monto a cobrar) pasa a tener su propio fondo
+    blanco (objectName `seccionEstadisticas`, mismo `t['superficie']` que
+    el resto de los fondos claros del sistema), con un margen propio que
+    deja ver el gris del cuadrito por detrás entre una sección y la
+    siguiente — antes las tres quedaban todas sobre el mismo fondo gris
+    liso del contenido escrolable, sin ninguna separación visual entre
+    ellas más que el `addSpacing(12)` (que no pinta nada, solo deja
+    hueco del mismo gris)."""
+    seccion = QWidget()
+    seccion.setObjectName("seccionEstadisticas")
+    layout = QVBoxLayout(seccion)
+    layout.setContentsMargins(6, 6, 6, 6)
+    return seccion, layout
+
+
 def _texto_explicacion(texto: str) -> QLabel:
     """Cuadro de texto fijo (borde negro) que explica un botón puntual —
     antes había uno solo para los dos botones, ahora hay uno por botón,
@@ -587,7 +608,14 @@ class _PanelAvancePeriodo(QWidget):
         de `Liquidacion.monto_generado` para que "Total liquidado mes en
         curso" cierre siempre con la suma real de las liquidaciones
         emitidas del período). Una línea en blanco (`addSpacing(12)`,
-        pedido explícito) antes del primer subtítulo:
+        pedido explícito) antes del primer subtítulo. Ronda siguiente:
+        cada una de las tres cuentas queda envuelta en su propia
+        `_seccion_estadisticas` (fondo blanco, `objectName
+        seccionEstadisticas`) con el `addSpacing(12)` entre una y la
+        siguiente dejando ver el gris del cuadrito por detrás — pedido
+        explícito de la clienta para diferenciarlas visualmente (antes
+        las tres quedaban sobre el mismo fondo gris liso, sin ninguna
+        separación más que ese espaciado invisible):
 
         - "Liquidaciones mes en curso": los ocho conceptos que componen
           una liquidación (más "Otros ajustes", la bolsa de conceptos
@@ -607,36 +635,42 @@ class _PanelAvancePeriodo(QWidget):
 
         layout_contenido.addSpacing(12)
 
-        layout_contenido.addWidget(_subtitulo_negrita("Liquidaciones mes en curso"))
+        seccion_liquidaciones, layout_liquidaciones = _seccion_estadisticas()
+        layout_liquidaciones.addWidget(_subtitulo_negrita("Liquidaciones mes en curso"))
         self.etiqueta_detalle_liquidaciones = QLabel()
         self.etiqueta_detalle_liquidaciones.setWordWrap(True)
-        layout_contenido.addWidget(self.etiqueta_detalle_liquidaciones)
-        layout_contenido.addWidget(_linea_divisoria())
+        layout_liquidaciones.addWidget(self.etiqueta_detalle_liquidaciones)
+        layout_liquidaciones.addWidget(_linea_divisoria())
         self.etiqueta_total_liquidado = QLabel()
         self.etiqueta_total_liquidado.setStyleSheet("font-weight: bold;")
-        layout_contenido.addWidget(self.etiqueta_total_liquidado)
+        layout_liquidaciones.addWidget(self.etiqueta_total_liquidado)
+        layout_contenido.addWidget(seccion_liquidaciones)
 
         layout_contenido.addSpacing(12)
 
-        layout_contenido.addWidget(_subtitulo_negrita("Resultado del negocio"))
+        seccion_resultado, layout_resultado = _seccion_estadisticas()
+        layout_resultado.addWidget(_subtitulo_negrita("Resultado del negocio"))
         self.etiqueta_detalle_resultado = QLabel()
         self.etiqueta_detalle_resultado.setWordWrap(True)
-        layout_contenido.addWidget(self.etiqueta_detalle_resultado)
-        layout_contenido.addWidget(_linea_divisoria())
+        layout_resultado.addWidget(self.etiqueta_detalle_resultado)
+        layout_resultado.addWidget(_linea_divisoria())
         self.etiqueta_balance_negocio = QLabel()
         self.etiqueta_balance_negocio.setStyleSheet("font-weight: bold;")
-        layout_contenido.addWidget(self.etiqueta_balance_negocio)
+        layout_resultado.addWidget(self.etiqueta_balance_negocio)
+        layout_contenido.addWidget(seccion_resultado)
 
         layout_contenido.addSpacing(12)
 
-        layout_contenido.addWidget(_subtitulo_negrita("Monto a cobrar en el mes en curso"))
+        seccion_cobro, layout_cobro = _seccion_estadisticas()
+        layout_cobro.addWidget(_subtitulo_negrita("Monto a cobrar en el mes en curso"))
         self.etiqueta_detalle_cobro = QLabel()
         self.etiqueta_detalle_cobro.setWordWrap(True)
-        layout_contenido.addWidget(self.etiqueta_detalle_cobro)
-        layout_contenido.addWidget(_linea_divisoria())
+        layout_cobro.addWidget(self.etiqueta_detalle_cobro)
+        layout_cobro.addWidget(_linea_divisoria())
         self.etiqueta_monto_restante_a_cobrar = QLabel()
         self.etiqueta_monto_restante_a_cobrar.setStyleSheet("font-weight: bold;")
-        layout_contenido.addWidget(self.etiqueta_monto_restante_a_cobrar)
+        layout_cobro.addWidget(self.etiqueta_monto_restante_a_cobrar)
+        layout_contenido.addWidget(seccion_cobro)
 
         layout_contenido.addStretch()
         _agregar_contenido_escrolable(layout, contenido)

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from typing import Callable
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
@@ -374,13 +375,24 @@ def generar_pdf_propuesta(
     return ruta
 
 
-def generar_pdfs_propuesta_por_localidad(conn: sqlite3.Connection, directorio: str) -> list[str]:
+def generar_pdfs_propuesta_por_localidad(
+    conn: sqlite3.Connection, directorio: str, on_avance: Callable[[], None] | None = None,
+) -> list[str]:
     """Un PDF de Propuesta por cada localidad con edificios cargados: nunca
     mezcla edificios de distintas localidades en el mismo archivo. Los
     edificios sin localidad cargada quedan agrupados aparte, en un único
-    archivo sin sufijo de localidad. Devuelve las rutas generadas."""
+    archivo sin sufijo de localidad. Devuelve las rutas generadas.
+
+    `on_avance`, si se pasa, se llama después de generar cada localidad —
+    la pantalla "Archivos para enviar" lo usa para animar el cartel
+    "Procesando..." mientras dura el regenerado."""
     filas = conn.execute("SELECT IdEdificio, IdLocalidad FROM Edificio").fetchall()
     grupos: dict[int | None, list[int]] = {}
     for f in filas:
         grupos.setdefault(f["IdLocalidad"], []).append(f["IdEdificio"])
-    return [generar_pdf_propuesta(conn, directorio, ids_edificio=ids) for ids in grupos.values()]
+    rutas = []
+    for ids in grupos.values():
+        rutas.append(generar_pdf_propuesta(conn, directorio, ids_edificio=ids))
+        if on_avance is not None:
+            on_avance()
+    return rutas

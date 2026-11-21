@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
 
 from app.gui.pantallas.imagenes import _pixmap_primera_pagina_pdf
 from app.gui.widgets.foco import instalar_enter_avanza_foco
+from app.gui.widgets.procesando import Procesando
 from app.negocio.archivos_generados import SUBCARPETA_DISPONIBILIDAD, SUBCARPETA_PROPUESTA, carpeta_archivos_varios
 from app.pdf.disponibilidad_pdf import generar_pdfs_disponibilidad_por_localidad
 from app.pdf.propuesta_pdf import generar_pdfs_propuesta_por_localidad
@@ -191,7 +192,11 @@ class _PanelArchivosVarios(QWidget):
         etiqueta, subcarpeta = _TIPOS_DOCUMENTO[clave]
         try:
             directorio = str(carpeta_archivos_varios(self.conn, subcarpeta))
-            rutas = self._generador(clave)(self.conn, directorio)
+            # Pedido explícito de la clienta: mismo cartel "Procesando..."
+            # que ya tienen las liquidaciones, mientras dura la
+            # regeneración (uno o varios PDF, uno por localidad).
+            with Procesando(self, f"Regenerando {etiqueta}...") as procesando:
+                rutas = self._generador(clave)(self.conn, directorio, on_avance=procesando.tick)
         except ValueError as error:
             QMessageBox.warning(self, "Regenerar documento", str(error))
             return

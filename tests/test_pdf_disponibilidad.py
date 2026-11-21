@@ -115,3 +115,16 @@ def test_por_localidad_genera_un_archivo_separado_por_cada_una(conn, tmp_path):
     for ruta in rutas:
         with open(ruta, "rb") as f:
             assert f.read().startswith(b"%PDF")
+
+
+def test_por_localidad_llama_on_avance_una_vez_por_localidad(conn, tmp_path):
+    """Pedido de la clienta: cartel "Procesando..." animado mientras dura
+    la regeneración en "Archivos para enviar" — este callback es lo que
+    la pantalla usa para animarlo, una llamada por PDF generado."""
+    _crear_edificio(conn, "Ramos 1", "CABA")
+    _crear_edificio(conn, "San Justo 1", "San Justo")
+    llamadas = []
+
+    generar_pdfs_disponibilidad_por_localidad(conn, str(tmp_path), on_avance=lambda: llamadas.append(1))
+
+    assert len(llamadas) == 2

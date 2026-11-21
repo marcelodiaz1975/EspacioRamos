@@ -613,3 +613,108 @@ sandbox/contenedor" más arriba), ajeno a esta ronda. pyflakes limpio
 en `app/pdf/valores_pdf.py`, `app/pdf/liquidacion_pdf.py`, `app/db/
 migraciones.py`, `app/gui/pantallas/profesionales.py` y los tres
 archivos de test tocados.
+
+## Tres pedidos puntuales: Archivos para enviar (Procesando), Panel de control (separar las tres cuentas), Llaves (depósito abonado por defecto)
+
+### Archivos para enviar: cartel "Procesando..." mientras se regeneran los archivos
+
+Pedido explícito de la clienta: "Agregar relojito de arena y leyenda
+procesando como en las liquidaciones durante el tiempo en el que se
+regeneran los archivos." `_PanelArchivosVarios._regenerar_seleccionado`
+(`app/gui/pantallas/archivos_varios.py`, solapa "Archivos para enviar"
+de "Disponibilidad") llamaba directo a `generar_pdfs_propuesta_por_
+localidad`/`generar_pdfs_disponibilidad_por_localidad` (un PDF por
+localidad, `app/pdf/propuesta_pdf.py`/`app/pdf/disponibilidad_pdf.py`)
+sin ningún indicador — a diferencia de Liquidaciones, el loop "uno por
+localidad" vive DENTRO de esas funciones de negocio, no en la pantalla,
+así que no alcanzaba con envolver la llamada en `with Procesando(...)`
+a secas (el cartel se mostraría pero quedaría congelado, sin animar,
+durante toda la regeneración).
+
+Las dos funciones suman un parámetro opcional `on_avance: Callable[[],
+None] | None = None`, llamado una vez por cada PDF de localidad ya
+generado (mismo criterio en ambas, mínimo cambio: un `if on_avance is
+not None: on_avance()` dentro del loop que ya armaba la lista de
+rutas). `_regenerar_seleccionado` pasa `procesando.tick` como ese
+callback:
+
+```python
+with Procesando(self, f"Regenerando {etiqueta}...") as procesando:
+    rutas = self._generador(clave)(self.conn, directorio, on_avance=procesando.tick)
+```
+
+Mismo mecanismo compartido (`app/gui/widgets/procesando.py`) que ya
+usan las liquidaciones — nada nuevo ahí.
+
+Tests: `tests/test_pdf_disponibilidad.py`/`tests/test_pdf_propuesta.py`
+(+1 cada uno: `on_avance` se llama una vez por localidad generada).
+`tests/test_gui_archivos_varios.py` (+1: `Procesando` se instancia una
+vez al regenerar; el test existente `test_regenerar_sin_archivos_
+generados_no_rompe_la_vista_previa`, que monkeypatchea el generador con
+un lambda de dos argumentos, se actualiza a tres con `on_avance=None`
+para no romper con la nueva firma). pyflakes limpio en los tres
+archivos de `app/` tocados y los tres de test.
+
+### Panel de control: separar visualmente las tres cuentas de "Estadísticas principales mes en curso"
+
+Pedido explícito de la clienta: "El fondo del contenido de todo el
+recuadro de 'Estadísticas principales mes en curso' es todo gris,
+separame las tres cuentas con un espacio en blanco finito aunque sea,
+como el fondo del título del cuadro, como para que visualmente las
+tres secciones dentro del cuadro queden diferenciadas." Investigado
+antes de tocar nada: el cuadrito (`QFrame#cuadritoInfo`, `_tarjeta` en
+`app/gui/pantallas/panel_control.py`) nunca tuvo un `background-color`
+propio — solo el borde — así que tanto el título como el contenido de
+abajo caían al gris default de Qt por igual (confirmado armando la
+pantalla real offscreen y muestreando píxeles: título y contenido daban
+el mismo `#efefef`, ningún color "blanco" preexistente en ningún lado
+de este cuadrito en particular).
+
+Cada una de las tres cuentas ("Liquidaciones mes en curso"/"Resultado
+del negocio"/"Monto a cobrar en el mes en curso") pasa a envolverse en
+su propio widget con objectName nuevo `seccionEstadisticas`
+(`_seccion_estadisticas()`, nueva en `panel_control.py`), con fondo
+blanco (`t['superficie']`, misma regla QSS que ya usa `QWidget#
+panelSolapa` — sumada en `app/gui/estilos.py`) y un margen propio
+(`setContentsMargins(6, 6, 6, 6)`). El `addSpacing(12)` que ya separaba
+una cuenta de la siguiente queda igual (sigue siendo del mismo gris que
+el resto del contenido escrolable, sin pintar nada) — pero ahora, al
+estar entre dos secciones blancas, se ve como el "espacio en blanco
+finito" pedido: tres cuadros blancos recortados contra el gris de
+fondo, en vez de un bloque gris liso sin ninguna separación. Nada de
+esto toca los otros cinco cuadritos del panel (`cuadritoInfo` en sí no
+cambió, el objectName nuevo es exclusivo de estas tres secciones).
+
+Tests actualizados en `tests/test_gui_panel_control.py`: los dos que
+asumían que las seis etiquetas vivían directo en un único `contenido`
+compartido (`test_tarjeta_estadisticas_principales_linea_en_blanco_
+antes_del_primer_subtitulo`/`test_tarjeta_estadisticas_principales_
+orden_de_las_tres_secciones`) se reescriben para subir un nivel más
+(`_contenido_estadisticas`, nuevo helper de test) y, en el segundo,
+chequear el orden de las TRES secciones entre sí además del orden
+detalle→total DENTRO de cada una. Test nuevo:
+`test_tarjeta_estadisticas_principales_las_tres_secciones_tienen_
+fondo_blanco`. Verificado armando la pantalla real offscreen y
+comparando colores de píxeles antes/después (ver captura enviada:
+las tres cuentas en blanco, separadas por el gris del cuadrito).
+pyflakes limpio en `panel_control.py`/`estilos.py`/el archivo de test.
+
+### Llaves: diálogo de carga a profesional — ya estaba resuelto
+
+Pedido: "Cuando se cargue una llave a un profesional que por defecto
+en el cuadro de diálogo el depósito sea 'Depósito abonado (se cobra el
+monto)'." Investigado antes de tocar nada: `_DialogoAsignar.combo_
+deposito` (`app/gui/pantallas/llaves.py`) ya agrega "Depósito abonado
+(se cobra el monto)" como PRIMER ítem (índice 0, el default de todo
+`QComboBox` recién creado) desde una ronda anterior — ya documentado en
+un comentario en el propio código ("pedido explícito posterior de la
+clienta: cuando asigno una llave por defecto que el depósito sea
+Depósito abonado") y cubierto por un test ya existente,
+`test_dialogo_asignar_arranca_en_abonado_con_monto_habilitado`
+(`tests/test_gui_llaves.py`), que sigue pasando tal cual. Lo único que
+puede forzarlo a "Bonificado" es `_al_cambiar_profesional` cuando el
+profesional elegido es categoría B (regla de negocio aparte, confirmada
+por la clienta en su momento: "un profesional B nunca paga depósito").
+No hacía falta ningún cambio de código — este pedido quedaba
+satisfecho por trabajo de una ronda anterior; se cierra solo con la
+verificación.

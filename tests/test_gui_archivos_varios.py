@@ -3,7 +3,9 @@ from PySide6.QtWidgets import QMessageBox, QPushButton
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
+from app.gui.pantallas import archivos_varios as modulo_archivos_varios
 from app.gui.pantallas.archivos_varios import _PanelArchivosVarios, _SIN_SELECCION
+from app.gui.widgets.procesando import Procesando
 from app.repositorio.registro import obtener_repositorio
 
 
@@ -119,6 +121,33 @@ def test_regenerar_propuesta_genera_archivo_y_actualiza_la_vista_previa(qtbot, c
     assert pantalla.etiqueta_preview.text() != _SIN_SELECCION
 
 
+def test_regenerar_muestra_cartel_procesando_mientras_dura(qtbot, conn, monkeypatch, tmp_path):
+    """Pedido explícito de la clienta: "Agregar relojito de arena y
+    leyenda procesando como en las liquidaciones durante el tiempo en
+    el que se regeneran los archivos" — mismo mecanismo `Procesando` que
+    ya usan las liquidaciones."""
+    obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+    pantalla = _PanelArchivosVarios(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._seleccionar("propuesta")
+
+    instancias = []
+    clase_original = modulo_archivos_varios.Procesando
+
+    class _ProcesandoRegistrado(clase_original):
+        def __enter__(self):
+            instancias.append(self)
+            return super().__enter__()
+
+    monkeypatch.setattr(modulo_archivos_varios, "Procesando", _ProcesandoRegistrado)
+    pantalla._regenerar_seleccionado()
+
+    assert len(instancias) == 1
+    assert isinstance(instancias[0], Procesando)
+
+
 def test_regenerar_disponibilidad_genera_archivo(qtbot, conn, tmp_path):
     obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
@@ -184,7 +213,8 @@ def test_regenerar_sin_archivos_generados_no_rompe_la_vista_previa(qtbot, conn, 
     qtbot.addWidget(pantalla)
     pantalla._seleccionar("propuesta")
     monkeypatch.setattr(
-        "app.gui.pantallas.archivos_varios.generar_pdfs_propuesta_por_localidad", lambda conn, directorio: [],
+        "app.gui.pantallas.archivos_varios.generar_pdfs_propuesta_por_localidad",
+        lambda conn, directorio, on_avance=None: [],
     )
     pantalla._regenerar_seleccionado()
     assert pantalla.etiqueta_preview.text() == "No se generó ningún archivo para previsualizar."

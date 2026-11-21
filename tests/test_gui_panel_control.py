@@ -592,6 +592,15 @@ def test_tarjeta_estadisticas_principales_tres_subtitulos_en_negrita_y_en_orden(
     ]
 
 
+def _contenido_estadisticas(panel):
+    """Ronda "separar visualmente las tres secciones": cada una de las
+    tres cuentas quedó envuelta en su propia `seccionEstadisticas`
+    (fondo blanco) — el padre directo de `etiqueta_total_liquidado` ya
+    no es el `contenido` general de las tres secciones sino esa sección
+    puntual; subir un nivel más devuelve el mismo widget que antes."""
+    return panel.etiqueta_total_liquidado.parentWidget().parentWidget()
+
+
 def test_tarjeta_estadisticas_principales_linea_en_blanco_antes_del_primer_subtitulo(qtbot, conn):
     """Pedido explícito de la clienta: una línea de espacio en blanco
     antes de "Liquidaciones mes en curso" (el primer subtítulo) —
@@ -599,30 +608,58 @@ def test_tarjeta_estadisticas_principales_linea_en_blanco_antes_del_primer_subti
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_avance
-    contenido = panel.etiqueta_total_liquidado.parentWidget()
+    contenido = _contenido_estadisticas(panel)
     layout = contenido.layout()
     primer_item_con_widget = next(i for i in range(layout.count()) if layout.itemAt(i).widget() is not None)
     assert primer_item_con_widget > 0  # hay al menos un ítem de espaciado antes
 
 
 def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, conn):
-    """Cada sección (detalle + total en negrita) tiene que quedar antes
-    que la siguiente, en el mismo `QVBoxLayout` — "Liquidaciones mes en
-    curso" primero, después "Resultado del negocio", después "Monto a
-    cobrar en el mes en curso"."""
+    """Cada sección (envuelta en su propia `seccionEstadisticas`) tiene
+    que quedar antes que la siguiente, en el mismo `QVBoxLayout` —
+    "Liquidaciones mes en curso" primero, después "Resultado del
+    negocio", después "Monto a cobrar en el mes en curso"; y DENTRO de
+    cada una, el detalle sigue quedando antes que su total en negrita."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_avance
-    contenido = panel.etiqueta_total_liquidado.parentWidget()
+    contenido = _contenido_estadisticas(panel)
     layout = contenido.layout()
     orden = [layout.itemAt(i).widget() for i in range(layout.count())]
     indice = {id(w): i for i, w in enumerate(orden) if w is not None}
-    posiciones = [
-        indice[id(panel.etiqueta_detalle_liquidaciones)], indice[id(panel.etiqueta_total_liquidado)],
-        indice[id(panel.etiqueta_detalle_resultado)], indice[id(panel.etiqueta_balance_negocio)],
-        indice[id(panel.etiqueta_detalle_cobro)], indice[id(panel.etiqueta_monto_restante_a_cobrar)],
-    ]
-    assert posiciones == sorted(posiciones)
+    seccion_liquidaciones = panel.etiqueta_total_liquidado.parentWidget()
+    seccion_resultado = panel.etiqueta_balance_negocio.parentWidget()
+    seccion_cobro = panel.etiqueta_monto_restante_a_cobrar.parentWidget()
+    assert indice[id(seccion_liquidaciones)] < indice[id(seccion_resultado)] < indice[id(seccion_cobro)]
+
+    for seccion, detalle, total in (
+        (seccion_liquidaciones, panel.etiqueta_detalle_liquidaciones, panel.etiqueta_total_liquidado),
+        (seccion_resultado, panel.etiqueta_detalle_resultado, panel.etiqueta_balance_negocio),
+        (seccion_cobro, panel.etiqueta_detalle_cobro, panel.etiqueta_monto_restante_a_cobrar),
+    ):
+        layout_seccion = seccion.layout()
+        orden_seccion = [layout_seccion.itemAt(i).widget() for i in range(layout_seccion.count())]
+        indice_seccion = {id(w): i for i, w in enumerate(orden_seccion) if w is not None}
+        assert indice_seccion[id(detalle)] < indice_seccion[id(total)]
+
+
+def test_tarjeta_estadisticas_principales_las_tres_secciones_tienen_fondo_blanco(qtbot, conn):
+    """Pedido explícito de la clienta: "el fondo del contenido de todo
+    el recuadro es todo gris, separame las tres cuentas con un espacio
+    en blanco finito aunque sea, como el fondo del título del cuadro,
+    para que las tres secciones queden diferenciadas" — cada cuenta
+    pasa a tener objectName `seccionEstadisticas` (fondo blanco)."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_avance
+    secciones = {
+        panel.etiqueta_total_liquidado.parentWidget(),
+        panel.etiqueta_balance_negocio.parentWidget(),
+        panel.etiqueta_monto_restante_a_cobrar.parentWidget(),
+    }
+    assert len(secciones) == 3
+    for seccion in secciones:
+        assert seccion.objectName() == "seccionEstadisticas"
 
 
 def test_tarjeta_estadisticas_principales_los_tres_totales_van_en_negrita(qtbot, conn):
