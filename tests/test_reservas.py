@@ -714,6 +714,65 @@ def test_reserva_aislada_choca_con_regular_vigente(conn, consultorio, profesiona
         )
 
 
+def test_reserva_aislada_choca_con_otra_aislada_del_mismo_profesional(conn, consultorio, profesional_factory):
+    """Bug real reportado por la clienta: tenía una aislada cargada para
+    un profesional de 10 a 11hs y, sin recordarlo, agregó al MISMO
+    profesional otra de 9 a 11hs en el mismo consultorio/día — el
+    sistema avisó pero igual creó las dos, superpuestas una hora. Tiene
+    que bloquear directamente (sin crear nada), igual que si fuera un
+    profesional sin relación de equipo."""
+    id_prof = profesional_factory("Lo Veci")
+    fecha = "2026-11-26"
+    crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, fecha=fecha, hora_inicio=10, hora_fin=11,
+    )
+    with pytest.raises(ConflictoBloqueanteError):
+        crear_reserva_aislada(
+            conn, id_profesional=id_prof, id_consultorio=consultorio, fecha=fecha, hora_inicio=9, hora_fin=11,
+        )
+    # La primera reserva sigue sola — la segunda no se llegó a crear.
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 1
+
+
+def test_reserva_aislada_no_choca_con_otra_aislada_del_mismo_profesional_sin_superponerse(
+    conn, consultorio, profesional_factory,
+):
+    """Contraparte del test anterior: dos aisladas del mismo profesional
+    en el mismo consultorio/día, pero en horarios que NO se superponen,
+    tienen que poder coexistir sin ningún aviso ni bloqueo."""
+    id_prof = profesional_factory("Lo Veci")
+    fecha = "2026-11-26"
+    crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, fecha=fecha, hora_inicio=9, hora_fin=10,
+    )
+    id_reserva, advertencias = crear_reserva_aislada(
+        conn, id_profesional=id_prof, id_consultorio=consultorio, fecha=fecha, hora_inicio=10, hora_fin=11,
+    )
+    assert id_reserva is not None
+    assert advertencias == []
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 2
+
+
+def test_reserva_aislada_choca_con_otra_aislada_de_e_y_su_cabeza_de_equipo_sigue_siendo_aviso(
+    conn, consultorio, profesional_factory,
+):
+    """La excepción de equipo (E y su propia R) no se toca: sigue siendo
+    aviso, no bloqueo, cuando son dos profesionales DISTINTOS — el fix
+    de "mismo profesional siempre bloquea" no afecta este otro caso."""
+    id_r = profesional_factory("Cabeza", categoria="R")
+    id_e = profesional_factory("Equipo", categoria="E", cabeza_equipo=id_r)
+    fecha = "2026-11-26"
+    crear_reserva_aislada(
+        conn, id_profesional=id_r, id_consultorio=consultorio, fecha=fecha, hora_inicio=10, hora_fin=11,
+    )
+    id_reserva, advertencias = crear_reserva_aislada(
+        conn, id_profesional=id_e, id_consultorio=consultorio, fecha=fecha, hora_inicio=9, hora_fin=11,
+    )
+    assert id_reserva is not None
+    assert len(advertencias) == 1
+    assert conn.execute("SELECT COUNT(*) c FROM ReservaAislada").fetchone()["c"] == 2
+
+
 def test_reserva_aislada_en_feriado_no_choca_con_regular(conn, consultorio, profesional_factory):
     """Pedido explícito de la clienta: si el día es feriado (o día no
     laborable), el consultorio se considera libre de la reserva regular

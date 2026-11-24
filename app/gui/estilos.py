@@ -186,7 +186,7 @@ QTabBar::tab:!selected {{
     margin-top: 2px;
 }}
 QWidget#panelSolapa {{ background-color: {t['superficie']}; }}
-QWidget#seccionEstadisticas {{ background-color: {t['superficie']}; }}
+QWidget#separadorEstadisticas {{ background-color: {t['superficie']}; }}
 QGroupBox#panelFiltrosGrilla::title {{
     font-size: 15px; font-weight: bold; color: {t['texto']};
     subcontrol-origin: margin; padding: 4px 0px;

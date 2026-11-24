@@ -680,8 +680,12 @@ class _PanelVacaciones(QWidget):
         "Año calendario a imputar" solo controla qué se va a crear y el
         cupo mostrado más abajo, por eso la lista lleva su propia
         columna "Año calendario" para distinguir a qué período
-        corresponde cada fila (Orden: código del profesional y luego
-        fecha desde, que ya trae el año)."""
+        corresponde cada fila. Orden por defecto (sin ningún click en un
+        encabezado), pedido explícito de la clienta: "Año calendario" de
+        menor a mayor, luego "Desde", luego "Hasta", luego Código de
+        profesional — "Año calendario" es literalmente el año de
+        FechaDesde, así que ordenar por FechaDesde ya alcanza para los
+        dos primeros criterios a la vez."""
         id_profesional_filtro = self.combo_profesional.currentData()
         repo_profesional = obtener_repositorio(self.conn, "Profesional")
         todas = obtener_repositorio(self.conn, "Vacacion").listar()
@@ -692,7 +696,10 @@ class _PanelVacaciones(QWidget):
         filas: list[tuple[sqlite3.Row, sqlite3.Row | None]] = [
             (r, repo_profesional.obtener(r["IdProfesional"])) for r in filtradas
         ]
-        filas.sort(key=lambda t: (clave_orden_codigo(t[1]["IdCodigo"]) if t[1] else ("", -1, ""), t[0]["FechaDesde"]))
+        filas.sort(key=lambda t: (
+            t[0]["FechaDesde"][:4], t[0]["FechaDesde"], t[0]["FechaHasta"],
+            clave_orden_codigo(t[1]["IdCodigo"]) if t[1] else ("", -1, ""),
+        ))
         if self._orden.columna is not None:
             filas.sort(key=self._clave_orden(self._orden.columna), reverse=not self._orden.ascendente)
         self._registros = [t[0] for t in filas]

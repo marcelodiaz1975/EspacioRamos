@@ -153,6 +153,52 @@ def test_vacaciones_fechas_desde_hasta_alineadas_a_la_derecha(qtbot, conn):
     assert panel.tabla.item(0, 3).textAlignment() == Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 
 
+def test_vacaciones_orden_por_defecto_anio_desde_hasta_codigo(qtbot, conn):
+    """Pedido explícito de la clienta: "que la tabla esté ordenada
+    primero por 'Año calendario' de menor a mayor, luego por 'Desde',
+    luego por 'Hasta', luego por Código de profesional" — sin ningún
+    click en un encabezado. Se arman profesionales con código R1/R2
+    (R2 primero en la base, para no confundir el orden de inserción con
+    el de código) y vacaciones a propósito fuera de orden."""
+    repo_prof = obtener_repositorio(conn, "Profesional")
+    id_r2 = repo_prof.crear(CategoriaProfesional="R", Apellido="Dos", IdCodigo="R2")
+    id_r1 = repo_prof.crear(CategoriaProfesional="R", Apellido="Uno", IdCodigo="R1")
+    repo_vac = obtener_repositorio(conn, "Vacacion")
+    # Mismo año/Desde (2027), R2 antes que R1 en la base — tiene que
+    # quedar R1 primero en la tabla (código de profesional como último
+    # desempate).
+    repo_vac.crear(IdProfesional=id_r2, FechaDesde="2027-01-10", FechaHasta="2027-01-15")
+    repo_vac.crear(IdProfesional=id_r1, FechaDesde="2027-01-10", FechaHasta="2027-01-20")
+    # Mismo año/Desde (2027-01-10) que la de arriba, pero Hasta más
+    # próximo (01-15 < 01-20): tiene que quedar antes.
+    repo_vac.crear(IdProfesional=id_r1, FechaDesde="2027-01-10", FechaHasta="2027-01-12")
+    # Año 2026 (anterior a 2027): tiene que quedar primero de todas,
+    # aunque su Desde sea posterior en el calendario (diciembre).
+    repo_vac.crear(IdProfesional=id_r1, FechaDesde="2026-12-20", FechaHasta="2026-12-27")
+    # Mismo Desde Y Hasta exactos, R2 insertado antes que R1 en la base:
+    # con Desde/Hasta empatados, el último desempate (Código de
+    # profesional) tiene que poner a R1 antes que R2.
+    repo_vac.crear(IdProfesional=id_r2, FechaDesde="2027-03-01", FechaHasta="2027-03-05")
+    repo_vac.crear(IdProfesional=id_r1, FechaDesde="2027-03-01", FechaHasta="2027-03-05")
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_vacaciones
+
+    desde_hasta_codigo = [
+        (r["FechaDesde"], r["FechaHasta"], repo_prof.obtener(r["IdProfesional"])["IdCodigo"])
+        for r in panel._registros
+    ]
+    assert desde_hasta_codigo == [
+        ("2026-12-20", "2026-12-27", "R1"),
+        ("2027-01-10", "2027-01-12", "R1"),
+        ("2027-01-10", "2027-01-15", "R2"),
+        ("2027-01-10", "2027-01-20", "R1"),
+        ("2027-03-01", "2027-03-05", "R1"),
+        ("2027-03-01", "2027-03-05", "R2"),
+    ]
+
+
 def test_vacaciones_columnas_desde_hasta_en_adelante_se_estiran_al_ancho_de_la_pantalla(qtbot, conn):
     """Pedido explícito de la clienta: "amplia el ancho de las columnas
     para que se aproveche el ancho de la pantalla" — Desde/Hasta/Valor

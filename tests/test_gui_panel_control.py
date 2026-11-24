@@ -366,7 +366,11 @@ def test_tarjeta_reloj_muestra_fecha_y_hora_real_con_segundos(qtbot, conn):
 
 
 def test_tarjeta_reloj_se_actualiza_con_el_timer(qtbot, conn, monkeypatch):
-    momentos = iter([datetime(2026, 8, 25, 14, 45, 0), datetime(2026, 8, 25, 14, 45, 1)])
+    momentos = iter([
+        datetime(2026, 8, 25, 14, 45, 0),  # _fecha_ultima_actualizacion al construir
+        datetime(2026, 8, 25, 14, 45, 0),
+        datetime(2026, 8, 25, 14, 45, 1),
+    ])
     monkeypatch.setattr(
         "app.gui.pantallas.panel_control.datetime",
         type("_FakeDatetime", (), {"now": staticmethod(lambda: next(momentos))}),
@@ -376,6 +380,59 @@ def test_tarjeta_reloj_se_actualiza_con_el_timer(qtbot, conn, monkeypatch):
     assert pantalla.panel_avance.etiqueta_reloj.text() == "mar 25-08-2026 14:45:00hs"
     pantalla.panel_avance._actualizar_reloj()
     assert pantalla.panel_avance.etiqueta_reloj.text() == "mar 25-08-2026 14:45:01hs"
+
+
+def test_actualizar_reloj_dispara_actualizar_completo_al_cruzar_la_medianoche(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: "si dejo el sistema abierto de un
+    día para otro la info que muestra en esa pantalla queda anclada al
+    día que se abrió... que con cada proceso que refresque el contenido
+    de esa pantalla [lo haga] de acuerdo al día real" — el timer del
+    reloj (ya corre cada segundo) detecta que la fecha real cambió desde
+    la última vez que se refrescó el contenido completo y dispara
+    `actualizar()` una sola vez, sin esperar a un F5 o a volver a entrar
+    a la solapa."""
+    momentos = iter([
+        datetime(2026, 8, 25, 23, 59, 0),  # _fecha_ultima_actualizacion al construir
+        datetime(2026, 8, 25, 23, 59, 1),  # primer tick del timer, mismo día: no dispara
+        datetime(2026, 8, 26, 0, 0, 2),  # segundo tick, ya cruzó la medianoche: dispara
+    ])
+    monkeypatch.setattr(
+        "app.gui.pantallas.panel_control.datetime",
+        type("_FakeDatetime", (), {"now": staticmethod(lambda: next(momentos))}),
+    )
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_avance
+    llamadas = []
+    monkeypatch.setattr(panel, "actualizar", lambda: llamadas.append(1))
+
+    panel._actualizar_reloj()
+
+    assert llamadas == [1]
+
+
+def test_actualizar_reloj_no_dispara_actualizar_completo_en_el_mismo_dia(qtbot, conn, monkeypatch):
+    """Contraparte del test anterior: mientras la fecha real no cambie,
+    el tick del reloj (cada segundo) NO tiene que disparar el refresco
+    completo de la pantalla — solo el día en que efectivamente cambia."""
+    momentos = iter([
+        datetime(2026, 8, 25, 14, 45, 0),
+        datetime(2026, 8, 25, 14, 45, 1),
+        datetime(2026, 8, 25, 14, 45, 2),
+    ])
+    monkeypatch.setattr(
+        "app.gui.pantallas.panel_control.datetime",
+        type("_FakeDatetime", (), {"now": staticmethod(lambda: next(momentos))}),
+    )
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_avance
+    llamadas = []
+    monkeypatch.setattr(panel, "actualizar", lambda: llamadas.append(1))
+
+    panel._actualizar_reloj()
+
+    assert llamadas == []
 
 
 def test_tarjeta_periodo_actual(qtbot, conn):
@@ -594,24 +651,25 @@ def test_tarjeta_estadisticas_principales_tres_subtitulos_en_negrita_y_en_orden(
 
 def _contenido_estadisticas(panel):
     """Ronda "separar visualmente las tres secciones": cada una de las
-    tres cuentas quedó envuelta en su propia `seccionEstadisticas`
-    (fondo blanco) — el padre directo de `etiqueta_total_liquidado` ya
+    tres cuentas quedó envuelta en su propio widget (`_seccion_
+    estadisticas`) — el padre directo de `etiqueta_total_liquidado` ya
     no es el `contenido` general de las tres secciones sino esa sección
     puntual; subir un nivel más devuelve el mismo widget que antes."""
     return panel.etiqueta_total_liquidado.parentWidget().parentWidget()
 
 
-def test_tarjeta_estadisticas_principales_linea_en_blanco_antes_del_primer_subtitulo(qtbot, conn):
-    """Pedido explícito de la clienta: una línea de espacio en blanco
-    antes de "Liquidaciones mes en curso" (el primer subtítulo) —
-    mismo `addSpacing(12)` ya usado entre las otras dos secciones."""
+def test_tarjeta_estadisticas_principales_sin_linea_en_blanco_antes_del_primer_subtitulo(qtbot, conn):
+    """Pedido explícito de la clienta, ronda siguiente a la que agregó
+    esa línea: "eliminá esa línea en blanco inicial arriba de
+    'Liquidaciones mes en curso'" — la primera cuenta pasa a ser el
+    primer ítem con widget del layout, sin ningún espaciador antes."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_avance
     contenido = _contenido_estadisticas(panel)
     layout = contenido.layout()
     primer_item_con_widget = next(i for i in range(layout.count()) if layout.itemAt(i).widget() is not None)
-    assert primer_item_con_widget > 0  # hay al menos un ítem de espaciado antes
+    assert primer_item_con_widget == 0
 
 
 def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, conn):
@@ -643,12 +701,12 @@ def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, con
         assert indice_seccion[id(detalle)] < indice_seccion[id(total)]
 
 
-def test_tarjeta_estadisticas_principales_las_tres_secciones_tienen_fondo_blanco(qtbot, conn):
-    """Pedido explícito de la clienta: "el fondo del contenido de todo
-    el recuadro es todo gris, separame las tres cuentas con un espacio
-    en blanco finito aunque sea, como el fondo del título del cuadro,
-    para que las tres secciones queden diferenciadas" — cada cuenta
-    pasa a tener objectName `seccionEstadisticas` (fondo blanco)."""
+def test_tarjeta_estadisticas_principales_las_tres_cuentas_sin_fondo_propio(qtbot, conn):
+    """Pedido explícito de la clienta, invirtiendo el esquema de color
+    de la ronda anterior: "todo lo que son las cuentas tiene que estar
+    en gris, y las líneas intermedias en blanco, o sea al revés que
+    ahora" — las tres cuentas ya NO llevan un objectName/fondo propio
+    (quedan transparentes, mostrando el gris del cuadrito por detrás)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_avance
@@ -659,7 +717,22 @@ def test_tarjeta_estadisticas_principales_las_tres_secciones_tienen_fondo_blanco
     }
     assert len(secciones) == 3
     for seccion in secciones:
-        assert seccion.objectName() == "seccionEstadisticas"
+        assert seccion.objectName() == ""
+
+
+def test_tarjeta_estadisticas_principales_los_separadores_intermedios_tienen_fondo_blanco(qtbot, conn):
+    """Contraparte del test anterior: el separador ENTRE una cuenta y la
+    siguiente es ahora el que lleva el fondo blanco (objectName
+    `separadorEstadisticas`) — hay exactamente dos, entre las tres
+    cuentas, ninguno antes de la primera ni después de la última."""
+    pantalla = PanelControl(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_avance
+    contenido = _contenido_estadisticas(panel)
+    layout = contenido.layout()
+    widgets = [layout.itemAt(i).widget() for i in range(layout.count())]
+    separadores = [w for w in widgets if w is not None and w.objectName() == "separadorEstadisticas"]
+    assert len(separadores) == 2
 
 
 def test_tarjeta_estadisticas_principales_los_tres_totales_van_en_negrita(qtbot, conn):

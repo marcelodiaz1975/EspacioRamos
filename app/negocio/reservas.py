@@ -239,7 +239,19 @@ def verificar_conflictos_aislada(
             continue
         if not _solapan(hora_inicio, hora_fin, fila["HoraInicio"], fila["HoraFin"]):
             continue
-        bloqueante = not _relacion_equipo(conn, id_profesional, fila["IdProfesional"])
+        # Bug real reportado por la clienta: cargó una aislada de 9 a
+        # 11hs para un profesional que ya tenía una de 10 a 11hs ese
+        # mismo día/consultorio, sin recordarlo — el sistema avisó pero
+        # igual creó las dos, superpuestas. `_relacion_equipo` devuelve
+        # True para "misma persona" (pensado para el caso legítimo de
+        # "aislada vs SU PROPIA regular" — reubicación, más abajo en
+        # este mismo archivo), pero acá, entre dos aisladas, nunca tiene
+        # sentido que un profesional quede doblemente reservado consigo
+        # mismo en el mismo horario: eso siempre bloquea, sin pasar por
+        # `_relacion_equipo` (que sigue aplicando tal cual para el caso
+        # de distintos profesionales de un mismo equipo, ej. E y su R).
+        mismo_profesional = id_profesional == fila["IdProfesional"]
+        bloqueante = True if mismo_profesional else not _relacion_equipo(conn, id_profesional, fila["IdProfesional"])
         conflictos.append(Conflicto(
             bloqueante=bloqueante,
             mensaje=(

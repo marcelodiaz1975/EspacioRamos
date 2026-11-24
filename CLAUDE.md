@@ -718,3 +718,176 @@ por la clienta en su momento: "un profesional B nunca paga depósito").
 No hacía falta ningún cambio de código — este pedido quedaba
 satisfecho por trabajo de una ronda anterior; se cierra solo con la
 verificación.
+
+## Cuatro pedidos puntuales: Panel de control (colores invertidos + refresco diario), Vacaciones (orden), General (maximizado), Reservas aisladas (bug de superposición)
+
+### Panel de control: sacar la línea en blanco inicial e invertir el esquema de color de "Estadísticas principales"
+
+Pedido explícito de la clienta, ronda siguiente a la de "separar
+visualmente las tres secciones": "eliminá esa línea en blanco inicial
+arriba de 'Liquidaciones mes en curso', luego invertí los colores de
+fondo, todo lo que son las cuentas tiene que estar en gris, y las
+líneas intermedias en blanco, o sea al revés que ahora." Investigado
+antes de tocar nada (armando la pantalla real offscreen y muestreando
+píxeles): el cuadrito (`QFrame#cuadritoInfo`) nunca tuvo un
+`background-color` propio — título y contenido caían los dos al mismo
+gris default de Qt (`#efefef`), así que "el fondo del título" de la
+ronda anterior no era, en rigor, un blanco ya existente — era solo la
+referencia de diseño general del sistema.
+
+`_seccion_estadisticas()` (envuelve cada una de las tres cuentas) pierde
+su objectName/fondo blanco — vuelve a ser un `QWidget` liso, que
+muestra el gris del cuadrito por detrás, igual que el resto del
+contenido. El objectName blanco (`t['superficie']`) se muda al
+separador INTERMEDIO: `_separador_estadisticas()`, nueva función,
+`QWidget` de alto fijo (12px) con objectName `separadorEstadisticas`
+(`estilos.py` sube la regla, reemplazando a la vieja `#seccionEstadisticas`)
+— se agrega entre cuenta 1→2 y cuenta 2→3 (dos en total), nunca antes
+de la primera ni después de la última. El `addSpacing(12)` que
+separaba la primera cuenta del título del cuadrito se saca directo, sin
+reemplazo — confirmado offscreen que, de paso, esto saca también el
+scroll vertical de más que aparecía en el cuadrito (ya no hay contenido
+de sobra para el alto disponible).
+
+Tests en `tests/test_gui_panel_control.py`: los dos que asumían fondo
+blanco en las cuentas se reescriben (`test_tarjeta_estadisticas_
+principales_las_tres_cuentas_sin_fondo_propio` confirma objectName
+vacío, `test_tarjeta_estadisticas_principales_los_separadores_
+intermedios_tienen_fondo_blanco` confirma exactamente dos widgets
+`separadorEstadisticas`); el de la línea en blanco inicial se invierte
+(`test_tarjeta_estadisticas_principales_sin_linea_en_blanco_antes_del_
+primer_subtitulo`, ahora exige que el primer ítem con widget sea el
+índice 0). pyflakes limpio en `panel_control.py`/`estilos.py`/el
+archivo de test. Suite conjunta de `test_gui_panel_control.py`/`test_
+panel_control.py`: 105 passed.
+
+### Panel de control: refrescar cumpleaños/fechas especiales contra la fecha real, no la del día que se abrió la app
+
+Pedido explícito de la clienta: "Noto que si dejo el sistema abierto de
+un día para otro la info que muestra en esa pantalla queda anclada al
+día que se abrió, por ejemplo me sigue marcando en rojo cumpleaños de
+personas de hace dos días, si se puede que con cada proceso que
+refresque el contenido de esa pantalla de acuerdo al día real de la
+fecha." Investigado antes de tocar nada: `fecha_real`/`cumpleanos_y_
+dias_profesion_proximos` (`app/negocio/dias.py`/`app/negocio/panel_
+control.py`) ya recalculan `date.today()` en vivo cada vez que se
+llaman — no había ningún valor cacheado ahí. El problema real es que
+nada volvía a llamar a `actualizar()` (el método que arma TODO el
+contenido de la solapa, incluido el resaltado en rojo de "hoy" en
+Cumpleaños/Fechas especiales) con solo el paso del tiempo: solo corría
+al construir la pantalla, al volver a entrar a la solapa (`showEvent`)
+o con F5 — dejando el sistema abierto en esa misma solapa de un día
+para el otro, sin tocar nada, nunca lo volvía a llamar.
+
+El timer del reloj en vivo (`self._timer_reloj`, ya corría cada
+segundo para `_actualizar_reloj`, que solo tocaba `etiqueta_reloj`)
+pasa a comparar la fecha real contra `self._fecha_ultima_
+actualizacion` (nueva, guardada al construir la pantalla) y, si cambió
+(cruzó la medianoche), dispara `self.actualizar()` completo una sola
+vez — no hace falta recalcular todo cada segundo, solo el día en que
+efectivamente cambia. Tests nuevos en `tests/test_gui_panel_control.py`
+(mockean `datetime.now`, mismo criterio que el test ya existente del
+reloj): `test_actualizar_reloj_dispara_actualizar_completo_al_cruzar_
+la_medianoche`, `test_actualizar_reloj_no_dispara_actualizar_completo_
+en_el_mismo_dia`; el test preexistente del reloj se actualiza para la
+llamada extra a `datetime.now()` que suma `_fecha_ultima_
+actualizacion` en el constructor.
+
+### Vacaciones: orden por defecto Año calendario → Desde → Hasta → Código de profesional
+
+Pedido explícito de la clienta: "que la tabla esté ordenada primero por
+'Año calendario' de menor a mayor, luego por 'Desde', luego por
+'Hasta', luego por Código de profesional." `_PanelVacaciones.actualizar`
+(`app/gui/pantallas/novedades.py`) ordenaba antes por código de
+profesional primero y Desde como único desempate — se invierte la
+prioridad completa: la clave de orden pasa a ser `(FechaDesde[:4],
+FechaDesde, FechaHasta, clave_orden_codigo(...))`. "Año calendario" es
+literalmente el año de `FechaDesde` (mismo valor que ya muestra esa
+columna en la tabla, `r["FechaDesde"][:4]`), así que ordenar por
+`FechaDesde` completo ya alcanza para los dos primeros criterios a la
+vez — se deja igual el año explícito como primer elemento de la tupla
+para que la intención quede clara en el código, aunque sea redundante
+hoy. El orden por click en un encabezado (`OrdenTabla`) no se toca —
+sigue aplicándose DESPUÉS como un `sort` estable adicional, este orden
+de base solo cambia el desempate entre filas iguales en esa columna.
+
+Test nuevo en `tests/test_gui_novedades.py`:
+`test_vacaciones_orden_por_defecto_anio_desde_hasta_codigo` — arma dos
+profesionales (R1/R2, insertados a propósito en el orden inverso al que
+tienen que terminar en la tabla) y vacaciones fuera de orden cubriendo
+los cuatro niveles de desempate (años distintos, mismo Desde con Hasta
+distinto, mismo Desde Y Hasta con código distinto). Suite completa de
+`test_gui_novedades.py`: 144 passed.
+
+### General: "cada tanto se distorsiona la pantalla" — sin patrón identificable, no se tocó código
+
+Pedido/comentario de la clienta: "Cada tanto es como que se distorsiona
+la pantalla y hay que tocar maximizar dos veces para que este efecto no
+se dé, si se te ocurre algo... quedo atento a tu comentario." Este bug
+(Windows, nunca reproducible en este sandbox Linux) ya tiene cinco
+rondas de investigación documentadas en `docs/historial/general.md`
+("Ventana principal: maximizado se destapa al entrar a la primera
+solapa") — la última dejó el reafirmado doble (restaurar→maximizar,
+dos veces, diferido con `QTimer.singleShot`) disparando SOLO en el
+primer cambio de solapa real de la sesión (`self._recien_ingresado`),
+con la clienta confirmando en su momento que, pasado ese primer cambio,
+navegar entre distintas solapas ya andaba bien (al punto de sacar el
+mismo reafirmado de F5 por pedido explícito, para no repetirlo sin
+necesidad).
+
+Antes de tocar código, se le preguntó a la clienta con qué parece
+coincidir esta nueva aparición (¿al volver de minimizar/alt-tab?
+¿después de dejarlo abierto mucho tiempo? ¿al cerrar un diálogo?) para
+acotar el disparador real sin arriesgar una reintroducción del parpadeo
+que se sacó a propósito de F5. Respuesta: "No tengo un patrón claro /
+pasa sin más" — sin ningún disparador identificable, no hay forma de
+armar una mitigación dirigida ni de verificar que una nueva no rompa el
+caso ya confirmado como resuelto. Se deja sin tocar código esta ronda;
+si vuelve a pasar, conviene que la clienta anote qué estaba haciendo
+justo antes (qué solapa, si acababa de minimizar/restaurar, cuánto
+tiempo llevaba el sistema abierto) para poder acotarlo en una próxima
+vuelta.
+
+### Reservas aisladas: bug real — dos aisladas superpuestas del MISMO profesional no bloqueaban
+
+Bug real reportado por la clienta: "Tenía una reserva de una
+profesional cargada para el 26-11 de 10 a 11hs. Quise agregar al mismo
+profesional la reserva para ese mismo día en el mismo consultorio de 9
+a 11hs sin recordar que tenía cargada una reserva para ese momento de
+una hora. Me salió el cartel de aviso, pero me creó igual la reserva,
+manteniendo la otra, es decir quedó una de una hora y otra de dos horas
+superponiéndose una hora de ellas. Me tendría que haber bloqueado la
+reserva sin procesar nada."
+
+Investigado en `verificar_conflictos_aislada` (`app/negocio/
+reservas.py`): el conflicto entre dos `ReservaAislada` del mismo
+consultorio/día con horario superpuesto se clasifica `bloqueante` según
+`_relacion_equipo(conn, id_profesional, fila["IdProfesional"])` — y esa
+función devuelve `True` ("relación de equipo", conflicto NO bloqueante,
+solo aviso) tanto para "mismo profesional" como para el par E/su propio
+R. La excepción "mismo profesional" tiene sentido en el OTRO loop de
+esta misma función (aislada contra una `ReservaRegular` — el caso real
+de "reubicación": el profesional se saca a sí mismo de su propio
+horario regular ese día para tomar la aislada en otro lado), pero entre
+dos aisladas ya CONFIRMADAS nunca tiene sentido dejar a un profesional
+doblemente reservado consigo mismo en el mismo horario — ahí es
+exactamente el bug reportado.
+
+Se acota el fix al loop aislada-vs-aislada únicamente (no se tocó
+`verificar_conflictos_regular` ni el loop aislada-vs-regular de la
+misma función, que siguen con su comportamiento de siempre): `mismo_
+profesional = id_profesional == fila["IdProfesional"]`; si es el mismo
+profesional, `bloqueante = True` siempre, sin pasar por `_relacion_
+equipo` — para profesionales DISTINTOS, `_relacion_equipo` sigue
+decidiendo igual que antes (la excepción E/su cabeza R no se toca).
+
+Tests nuevos en `tests/test_reservas.py`:
+`test_reserva_aislada_choca_con_otra_aislada_del_mismo_profesional`
+(reproduce el bug reportado exacto — `ConflictoBloqueanteError`, la
+segunda reserva nunca se crea), `test_reserva_aislada_no_choca_con_
+otra_aislada_del_mismo_profesional_sin_superponerse` (dos aisladas del
+mismo profesional sin superposición real siguen coexistiendo sin
+aviso), `test_reserva_aislada_choca_con_otra_aislada_de_e_y_su_cabeza_
+de_equipo_sigue_siendo_aviso` (confirma que la excepción de equipo
+entre profesionales DISTINTOS no se tocó). pyflakes limpio en
+`reservas.py`. Suite completa de `test_reservas.py`: 77 passed.

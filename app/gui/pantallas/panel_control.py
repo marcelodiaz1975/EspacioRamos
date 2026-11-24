@@ -230,24 +230,38 @@ def _subtitulo_negrita(texto: str) -> QLabel:
 
 
 def _seccion_estadisticas() -> tuple[QWidget, QVBoxLayout]:
-    """Pedido explícito de la clienta sobre "Estadísticas principales mes
-    en curso": "el fondo del contenido de todo el recuadro es todo gris,
-    separame las tres cuentas con un espacio en blanco finito aunque sea,
-    como el fondo del título del cuadro, para que las tres secciones
-    queden diferenciadas" — cada una de las tres cuentas (Liquidaciones/
-    Resultado del negocio/Monto a cobrar) pasa a tener su propio fondo
-    blanco (objectName `seccionEstadisticas`, mismo `t['superficie']` que
-    el resto de los fondos claros del sistema), con un margen propio que
-    deja ver el gris del cuadrito por detrás entre una sección y la
-    siguiente — antes las tres quedaban todas sobre el mismo fondo gris
-    liso del contenido escrolable, sin ninguna separación visual entre
-    ellas más que el `addSpacing(12)` (que no pinta nada, solo deja
-    hueco del mismo gris)."""
+    """Cada una de las tres cuentas de "Estadísticas principales mes en
+    curso" (Liquidaciones/Resultado del negocio/Monto a cobrar) queda
+    envuelta en su propio widget — sin ningún estilo propio, así que
+    muestra el mismo gris default del cuadrito (`cuadritoInfo`) por
+    detrás. Ronda anterior: este widget tenía fondo blanco y el espacio
+    ENTRE cuentas quedaba gris liso; pedido explícito de la clienta en
+    la ronda siguiente para invertir ese esquema: "todo lo que son las
+    cuentas tiene que estar en gris, y las líneas intermedias en
+    blanco, o sea al revés que ahora" — ver `_separador_estadisticas`,
+    que es ahora el que lleva el fondo blanco."""
     seccion = QWidget()
-    seccion.setObjectName("seccionEstadisticas")
     layout = QVBoxLayout(seccion)
     layout.setContentsMargins(6, 6, 6, 6)
     return seccion, layout
+
+
+def _separador_estadisticas() -> QWidget:
+    """Espacio ENTRE una cuenta y la siguiente, dentro de "Estadísticas
+    principales mes en curso" — fondo blanco (objectName
+    `separadorEstadisticas`, mismo `t['superficie']` que el resto de
+    los fondos claros del sistema) y alto fijo, en vez del
+    `addSpacing(12)` invisible que separaba las cuentas en la ronda
+    anterior (cuando las cuentas en sí eran las que llevaban el fondo
+    blanco). Sin separador antes de la primera cuenta ni después de la
+    última — pedido explícito de la clienta: "eliminá esa línea en
+    blanco inicial arriba de 'Liquidaciones mes en curso'" (esa misma
+    línea era, antes de esta ronda, la que generaba el scroll vertical
+    de más en el cuadrito: sacarla también lo saca)."""
+    separador = QWidget()
+    separador.setObjectName("separadorEstadisticas")
+    separador.setFixedHeight(12)
+    return separador
 
 
 def _texto_explicacion(texto: str) -> QLabel:
@@ -548,6 +562,7 @@ class _PanelAvancePeriodo(QWidget):
             [self.boton_backup, self.boton_restaurar, self.boton_avanzar], parent=self,
         )
 
+        self._fecha_ultima_actualizacion = datetime.now().date()
         self._timer_reloj = QTimer(self)
         self._timer_reloj.timeout.connect(self._actualizar_reloj)
         self._timer_reloj.start(1000)
@@ -559,8 +574,27 @@ class _PanelAvancePeriodo(QWidget):
         """Hora real del sistema, no la fecha ficticia de QA — un reloj en
         vivo tiene que mostrar la hora real para orientar al operador,
         aunque el resto de la pantalla esté calculando sobre una fecha
-        simulada."""
-        self.etiqueta_reloj.setText(_texto_fecha_hora(datetime.now(), con_segundos=True))
+        simulada.
+
+        Pedido explícito de la clienta: si el sistema queda abierto de
+        un día para el otro sin que nadie toque nada (sin F5, sin salir
+        y volver a entrar a la solapa), el resto del contenido de esta
+        pantalla — en particular el resaltado en rojo de "hoy" en
+        Cumpleaños/Fechas especiales (`_resaltar_si_es_hoy`, que
+        depende de `fecha_real`/`date.today()`) — quedaba "anclado" al
+        día en que se había llamado `actualizar()` por última vez,
+        porque nada volvía a llamarlo solo con el paso del tiempo. Este
+        timer YA corre cada un segundo para el reloj en vivo; en vez de
+        sumar un timer nuevo, alcanza con comparar la fecha real contra
+        la última vez que se refrescó el contenido completo y, si
+        cambió (cruzó la medianoche), disparar un `actualizar()`
+        completo una sola vez — no hace falta recalcular todo cada
+        segundo, solo el día en que efectivamente cambia."""
+        ahora = datetime.now()
+        self.etiqueta_reloj.setText(_texto_fecha_hora(ahora, con_segundos=True))
+        if ahora.date() != self._fecha_ultima_actualizacion:
+            self._fecha_ultima_actualizacion = ahora.date()
+            self.actualizar()
 
     def _armar_tarjeta_periodo_y_backup(self) -> QFrame:
         """Punto 76 (vuelta anterior): unifica "Fecha y hora actual" dentro
@@ -607,15 +641,17 @@ class _PanelAvancePeriodo(QWidget):
         EstadisticasPrincipales` para las fórmulas, derivadas exactamente
         de `Liquidacion.monto_generado` para que "Total liquidado mes en
         curso" cierre siempre con la suma real de las liquidaciones
-        emitidas del período). Una línea en blanco (`addSpacing(12)`,
-        pedido explícito) antes del primer subtítulo. Ronda siguiente:
-        cada una de las tres cuentas queda envuelta en su propia
-        `_seccion_estadisticas` (fondo blanco, `objectName
-        seccionEstadisticas`) con el `addSpacing(12)` entre una y la
-        siguiente dejando ver el gris del cuadrito por detrás — pedido
-        explícito de la clienta para diferenciarlas visualmente (antes
-        las tres quedaban sobre el mismo fondo gris liso, sin ninguna
-        separación más que ese espaciado invisible):
+        emitidas del período). Ronda siguiente: cada una de las tres
+        cuentas queda envuelta en su propia `_seccion_estadisticas`,
+        separadas entre sí por `_separador_estadisticas` (fondo
+        blanco) — pedido explícito de la clienta para diferenciarlas
+        visualmente (antes las tres quedaban sobre el mismo fondo gris
+        liso, sin ninguna separación). Tercera ronda: se invierte el
+        esquema de color (ahora las cuentas en sí quedan en gris y es
+        el separador INTERMEDIO el que lleva el fondo blanco — ver
+        `_seccion_estadisticas`/`_separador_estadisticas`) y se saca la
+        línea en blanco (`addSpacing(12)`) que había antes del primer
+        subtítulo, que además generaba un scroll vertical de más:
 
         - "Liquidaciones mes en curso": los ocho conceptos que componen
           una liquidación (más "Otros ajustes", la bolsa de conceptos
@@ -633,8 +669,6 @@ class _PanelAvancePeriodo(QWidget):
         layout_contenido = QVBoxLayout(contenido)
         layout_contenido.setContentsMargins(0, 0, 0, 0)
 
-        layout_contenido.addSpacing(12)
-
         seccion_liquidaciones, layout_liquidaciones = _seccion_estadisticas()
         layout_liquidaciones.addWidget(_subtitulo_negrita("Liquidaciones mes en curso"))
         self.etiqueta_detalle_liquidaciones = QLabel()
@@ -646,7 +680,7 @@ class _PanelAvancePeriodo(QWidget):
         layout_liquidaciones.addWidget(self.etiqueta_total_liquidado)
         layout_contenido.addWidget(seccion_liquidaciones)
 
-        layout_contenido.addSpacing(12)
+        layout_contenido.addWidget(_separador_estadisticas())
 
         seccion_resultado, layout_resultado = _seccion_estadisticas()
         layout_resultado.addWidget(_subtitulo_negrita("Resultado del negocio"))
@@ -659,7 +693,7 @@ class _PanelAvancePeriodo(QWidget):
         layout_resultado.addWidget(self.etiqueta_balance_negocio)
         layout_contenido.addWidget(seccion_resultado)
 
-        layout_contenido.addSpacing(12)
+        layout_contenido.addWidget(_separador_estadisticas())
 
         seccion_cobro, layout_cobro = _seccion_estadisticas()
         layout_cobro.addWidget(_subtitulo_negrita("Monto a cobrar en el mes en curso"))
