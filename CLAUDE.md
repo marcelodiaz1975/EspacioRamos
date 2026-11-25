@@ -1722,3 +1722,34 @@ tests, muchas pantallas con `QTableWidget` pesado) en un solo proceso,
 de la misma familia de bug de PySide6/shiboken investigada arriba para
 la planilla, pero a una escala que ya se da sin que esta ronda le
 agregue nada.
+
+## General: F5 vuelve a reafirmar el maximizado dos veces, en toda pantalla
+
+Pedido explícito de la clienta, sobre una decisión de una ronda
+anterior (#56, "F5 ya no simula doble maximizar" — ahí la clienta
+había pedido sacarlo porque no hacía falta repetirlo sin necesidad):
+
+> "General: Quiero que al presionar F5 en todas las pantallas aparte
+> de sus comportamientos propios me haga el efecto de presionar
+> maximizar dos veces para que la visualización se acomode."
+
+`_reiniciar_solapa_activa` (`app/gui/main_window.py`, el método detrás
+de F5/"Refrescar") suma `self._reafirmar_maximizado(veces=2)` al final,
+DESPUÉS de llamar `panel.reiniciar()` si el panel activo lo tiene — el
+mismo mecanismo ya existente (`_reafirmar_maximizado`, usado hasta
+ahora solo al entrar al sistema vía `_recien_ingresado`/
+`_cambiar_seccion`): restaurar y volver a maximizar, dos veces
+seguidas, cada paso diferido con `QTimer.singleShot(0, ...)`. No hace
+nada si la ventana no está maximizada (no hay geometría que
+reafirmar) — "aparte de sus comportamientos propios" se cumple porque
+se suma al refresco de cada panel, no lo reemplaza.
+
+Test reemplazado en `tests/test_main_window.py`:
+`test_f5_ya_no_reafirma_el_maximizado` → `test_f5_tambien_reafirma_el_
+maximizado_dos_veces` (confirma las 4 llamadas esperadas: normal,
+maximizar, normal, maximizar). Tests nuevos: `test_f5_no_reafirma_el_
+maximizado_si_la_ventana_no_esta_maximizada`, `test_f5_reafirma_el_
+maximizado_ademas_del_reiniciar_propio_del_panel` (confirma que
+conviven el refresco propio del panel Y el reafirmado, no que uno pisa
+al otro). pyflakes limpio en `main_window.py`. Suite de `tests/test_
+main_window.py`: 51 passed.

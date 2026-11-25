@@ -347,21 +347,25 @@ class VentanaPrincipal(QMainWindow):
         return widget
 
     def _reiniciar_solapa_activa(self) -> None:
-        """F3: "reinicia la solapa, la resetea, como recién se entrara en
-        ella" — mismo método (`reiniciar`) que cada panel ya implementa
-        para el reseteo automático al cambiar de pestaña (ver #1.4); los
-        paneles que todavía no lo tienen simplemente no hacen nada con F3,
-        en vez de romper.
+        """F5 ("Refrescar"): "reinicia la solapa, la resetea, como recién
+        se entrara en ella" — mismo método (`reiniciar`) que cada panel ya
+        implementa para el reseteo automático al cambiar de pestaña (ver
+        #1.4); los paneles que todavía no lo tienen simplemente no hacen
+        nada con el refresco propio, en vez de romper.
 
-        Pedido explícito de la clienta, ronda siguiente a la que sumó acá
-        el reafirmado de maximizado "por las dudas": sacarlo de F5 — que
-        vuelva a limitarse al refresco de siempre. El reafirmado al
-        iniciar el sistema (`_cambiar_seccion`/`_recien_ingresado`) ya
-        resuelve el bug visual; si hiciera falta volver a cubrirlo desde
-        F5 también, es la clienta la que lo vuelve a pedir explícitamente."""
+        Pedido explícito de la clienta (vuelve sobre una decisión de una
+        ronda anterior, que lo había sacado de acá): "al presionar F5 en
+        todas las pantallas, aparte de sus comportamientos propios, me
+        haga el efecto de presionar maximizar dos veces para que la
+        visualización se acomode" — en TODA pantalla, no solo al entrar al
+        sistema. Se suma el mismo reafirmado (`_reafirmar_maximizado`,
+        también usado en el ingreso al sistema vía `_recien_ingresado`)
+        DESPUÉS del refresco propio del panel — no hace nada si la
+        ventana no está maximizada."""
         panel = self._panel_mas_interno()
         if panel is not None and hasattr(panel, "reiniciar"):
             panel.reiniciar()
+        self._reafirmar_maximizado(veces=2)
 
     def _reafirmar_maximizado(self, *, veces: int) -> None:
         """Repite el gesto manual que la clienta confirma que arregla el

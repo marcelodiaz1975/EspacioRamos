@@ -695,11 +695,12 @@ def test_reafirmar_maximizado_no_hace_nada_si_no_esta_maximizada(qtbot, conn, mo
     assert ventana._recien_ingresado is False  # se consume igual, esté o no maximizada
 
 
-def test_f5_ya_no_reafirma_el_maximizado(qtbot, conn, monkeypatch):
-    """Pedido explícito de la clienta, corrigiendo la ronda anterior: que
-    F5 vuelva a limitarse al refresco de siempre, sin simular el doble
-    maximizar "por las dudas" — ese reafirmado queda solo al iniciar el
-    sistema (`_recien_ingresado`, ver `_cambiar_seccion`)."""
+def test_f5_tambien_reafirma_el_maximizado_dos_veces(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta (vuelve sobre una decisión de una
+    ronda anterior, que lo había sacado de F5): "al presionar F5 en todas
+    las pantallas, aparte de sus comportamientos propios, me haga el
+    efecto de presionar maximizar dos veces" — ahora en TODA pantalla,
+    no solo al entrar al sistema."""
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
     ventana._recien_ingresado = False  # ya se consumió, como en una sesión avanzada
@@ -708,4 +709,42 @@ def test_f5_ya_no_reafirma_el_maximizado(qtbot, conn, monkeypatch):
     ventana._reiniciar_solapa_activa()
     qtbot.wait(50)
 
+    assert llamadas == ["normal", "maximizar", "normal", "maximizar"]
+
+
+def test_f5_no_reafirma_el_maximizado_si_la_ventana_no_esta_maximizada(qtbot, conn, monkeypatch):
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    ventana._recien_ingresado = False
+    llamadas = _espiar_reafirmado(ventana, monkeypatch, maximizada=False)
+
+    ventana._reiniciar_solapa_activa()
+    qtbot.wait(50)
+
     assert llamadas == []
+
+
+def test_f5_reafirma_el_maximizado_ademas_del_reiniciar_propio_del_panel(qtbot, conn, monkeypatch):
+    """El reafirmado se suma al comportamiento propio de cada pantalla
+    (`reiniciar()`), no lo reemplaza — mismo caso que `test_f5_llama_
+    reiniciar_del_panel_activo_si_lo_tiene`, confirmando que los dos
+    efectos de F5 conviven."""
+    llamadas_panel = []
+
+    class _PanelConReset(QWidget):
+        def reiniciar(self):
+            llamadas_panel.append(True)
+
+    panel = _PanelConReset()
+    secciones = [Seccion("Con reset", lambda c: panel, categoria="X")]
+    ventana = VentanaPrincipal(conn, secciones)
+    qtbot.addWidget(ventana)
+    ventana._navegacion.setCurrentRow(1)  # "Con reset"
+    ventana._recien_ingresado = False
+    llamadas_maximizado = _espiar_reafirmado(ventana, monkeypatch, maximizada=True)
+
+    ventana._reiniciar_solapa_activa()
+    qtbot.wait(50)
+
+    assert llamadas_panel == [True]
+    assert llamadas_maximizado == ["normal", "maximizar", "normal", "maximizar"]
