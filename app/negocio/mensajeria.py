@@ -39,13 +39,24 @@ retomarlos más adelante al revisar los mensajes predefinidos.
 Bordó (pedido de la clienta, posterior a DC-02/DC-03): reemplaza a la
 vieja reactivación gris->rojo cerca de fin de mes (que solo miraba plan de
 pago + deuda del mes en curso) — la clienta la descartó explícitamente y
-pidió en su lugar un recordatorio que aplica a CUALQUIER profesional R con
-reserva regular activa, sin importar deuda ni plan: a partir de
-`DiasAntesFinMesRecordatorioGeneral` días de fin de mes, un gris con
-reserva regular activa pasa a bordó; al generar su mensaje (botón
-"Generar texto") vuelve a gris por el resto del período, aunque sigan
-dándose las mismas condiciones — se trackea con
-`RecordatorioMensajeriaGenerado`."""
+pidió en su lugar un recordatorio que aplica a CUALQUIER profesional R,
+sin importar deuda ni plan: a partir de
+`DiasAntesFinMesRecordatorioGeneral` días de fin de mes, un gris pasa a
+bordó; al generar su mensaje (botón "Generar texto") vuelve a gris por
+el resto del período, aunque sigan dándose las mismas condiciones — se
+trackea con `RecordatorioMensajeriaGenerado`. Primera vuelta de este
+pedido lo acotaba a quienes tuvieran una `ReservaRegular` vigente — la
+clienta pidió después sacar esa condición: "la idea es que se active el
+recordatorio en bordó para todos los profesionales de esa categoría",
+sin mirar reservas.
+
+Un gris que ya pasó por bordó este período sigue siendo "especial" para
+el botón "Generar texto": pedido explícito de la clienta, un reenvío
+manual (`recordatorio_mensajeria_ya_generado`) tiene que seguir
+generando el mismo mensaje de recordatorio de fin de mes (con los
+saldos vigentes al momento del reenvío), no el mensaje de envío de
+liquidación que usa el resto de los grises que nunca pasaron por bordó
+— la transición de color (bordó->gris) no cambia."""
 from __future__ import annotations
 
 import sqlite3
@@ -107,6 +118,18 @@ def marcar_recordatorio_mensajeria_generado(conn: sqlite3.Connection, id_profesi
     )
 
 
+def recordatorio_mensajeria_ya_generado(conn: sqlite3.Connection, id_profesional: int, periodo: str) -> bool:
+    """True si este profesional ya pasó por bordó en este período (el
+    recordatorio de fin de mes ya se generó al menos una vez) — lo usa
+    el botón "Generar texto" para, ya en gris, seguir reenviando ESE
+    mismo mensaje (actualizado con los saldos vigentes) en vez del
+    mensaje de envío de liquidación que usa el resto de los grises que
+    nunca pasaron por bordó. Pedido explícito de la clienta: un
+    reenvío manual no tiene que perder el tipo de mensaje."""
+    estado = _estado_periodo(conn, id_profesional, periodo)
+    return estado is not None and bool(estado["RecordatorioMensajeriaGenerado"])
+
+
 def marcar_recordatorio_deuda_x_generado(conn: sqlite3.Connection, id_profesional: int, hoy: date) -> None:
     """Marrón -> gris (categoría X con deuda, pedido posterior de la
     clienta: "las tareas de X"): se llama al generar el texto del
@@ -155,18 +178,6 @@ def _dias_recordatorio_deuda_x(conn: sqlite3.Connection) -> int:
         "SELECT DiasRecordatorioProfesionalXDejoEspacio FROM Configuracion WHERE IdConfiguracion = 1"
     ).fetchone()
     return cfg["DiasRecordatorioProfesionalXDejoEspacio"] if cfg else 30
-
-
-def _reserva_regular_activa(conn: sqlite3.Connection, id_profesional: int, hoy: date) -> bool:
-    """Mismo criterio que `app.negocio.panel_control._reserva_regular_activa`
-    (duplicado acá, módulos sin relación entre sí — incluso siendo los dos
-    de negocio, ese helper es privado de su módulo)."""
-    hoy_iso = hoy.isoformat()
-    return conn.execute(
-        "SELECT 1 FROM ReservaRegular WHERE IdProfesional = ? AND VigenciaInicio <= ? "
-        "AND (VigenciaFin IS NULL OR VigenciaFin >= ?) LIMIT 1",
-        (id_profesional, hoy_iso, hoy_iso),
-    ).fetchone() is not None
 
 
 def _plazo_vigente(profesional: sqlite3.Row, hoy: date) -> bool:
@@ -257,15 +268,17 @@ def color_profesional(conn: sqlite3.Connection, profesional: sqlite3.Row, period
 
 def _debe_recordar_fin_de_mes(conn: sqlite3.Connection, id_profesional: int, periodo: str, hoy: date) -> bool:
     """Gris -> bordó: a N días de fin de mes (parámetro configurable), un
-    gris con reserva regular activa que todavía no generó su recordatorio
-    este período pasa a bordó. Sin importar deuda ni plan de pago —
-    aplica a CUALQUIER profesional R que siga reservando regular, pedido
-    explícito de la clienta al descartar la vieja reactivación a rojo."""
+    gris que todavía no generó su recordatorio este período pasa a
+    bordó. Sin importar deuda ni plan de pago, ni si sigue reservando
+    regular — aplica a CUALQUIER profesional R, pedido explícito de la
+    clienta tanto al descartar la vieja reactivación a rojo como, en una
+    ronda posterior, al sacarle la condición de "reserva regular activa"
+    con la que se armó la primera vez ("la idea es que se active el
+    recordatorio en bordó para todos los profesionales de esa
+    categoría")."""
     estado = _estado_periodo(conn, id_profesional, periodo)
     if estado is not None and estado["RecordatorioMensajeriaGenerado"]:
         return False
     anio, mes = parsear_periodo(periodo)
     dias_para_fin_de_mes = (ultimo_dia_mes(anio, mes) - hoy).days
-    if dias_para_fin_de_mes > _dias_recordatorio_mensajeria(conn):
-        return False
-    return _reserva_regular_activa(conn, id_profesional, hoy)
+    return dias_para_fin_de_mes <= _dias_recordatorio_mensajeria(conn)

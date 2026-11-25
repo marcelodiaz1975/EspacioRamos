@@ -1,9 +1,11 @@
 """Centro de mensajería (DC-02, DC-03): lista de profesionales categoría
-R, A y X con deuda, ordenada por color (verde, amarillo, naranja, rojo,
-violeta, celeste, azul, bordó, marrón, gris — DC-02 §2.1 + bordó +
-marrón/X, estos dos últimos pedidos posteriores de la clienta) y, dentro
-de cada color, por código — salvo gris, donde los X quedan al final de
-ese grupo, después de los grises de R/A (ver `actualizar`).
+R, A y X con deuda, ordenada por color (bordó, verde, amarillo, naranja,
+rojo, violeta, celeste, azul, marrón, gris — bordó primero de todos,
+pedido explícito de la clienta: el recordatorio de fin de mes es
+urgente y tiene que verse antes que cualquier otro color, DC-02 §2.1 +
+bordó + marrón/X, estos dos últimos pedidos posteriores de la clienta)
+y, dentro de cada color, por código — salvo gris, donde los X quedan al
+final de ese grupo, después de los grises de R/A (ver `actualizar`).
 
 Cada fila tiene dos controles independientes (DC-02 §3): el check "Enviada"
 (solo habilitado para los colores que lo tienen asignado — DC-03 "Resumen
@@ -72,6 +74,7 @@ from app.negocio.mensajeria import (
     marcar_mensaje_aislada_generado,
     marcar_recordatorio_deuda_x_generado,
     marcar_recordatorio_mensajeria_generado,
+    recordatorio_mensajeria_ya_generado,
 )
 from app.gui.widgets.resumen_saldo import saldo_actual_mostrado
 from app.negocio.mensajes import (
@@ -95,11 +98,13 @@ _COLUMNA_BOTON = 6
 
 _ORDEN_COLOR = {
     color: orden for orden, color in enumerate(
-        # Marrón (categoría X con deuda) pedido explícito de la clienta:
-        # último color antes de los grises, ya no primero (ver docstring
-        # del módulo — el viejo marrón de R, "deuda dentro de
-        # tolerancia", se unificó con amarillo).
-        ("verde", "amarillo", "naranja", "rojo", "violeta", "celeste", "azul", "bordo", "marron", "gris")
+        # Bordó primero de todos (pedido explícito de la clienta: el
+        # recordatorio de fin de mes tiene que verse antes que cualquier
+        # otro color, ver docstring del módulo). Marrón (categoría X con
+        # deuda) pedido explícito de la clienta: último color antes de
+        # los grises, ya no primero (el viejo marrón de R, "deuda dentro
+        # de tolerancia", se unificó con amarillo).
+        ("bordo", "verde", "amarillo", "naranja", "rojo", "violeta", "celeste", "azul", "marron", "gris")
     )
 }
 
@@ -689,6 +694,12 @@ class _PanelCentroMensajeria(QWidget):
             texto = mensaje_recordatorio_fin_de_mes(self.conn, id_profesional, periodo)
             marcar_recordatorio_mensajeria_generado(self.conn, id_profesional, periodo)
             return texto
+        if color == "gris" and recordatorio_mensajeria_ya_generado(self.conn, id_profesional, periodo):
+            # Reenvío manual de un gris que ya pasó por bordó este período:
+            # sigue siendo el mensaje de recordatorio de fin de mes (con los
+            # saldos vigentes al momento del reenvío), no el de envío de
+            # liquidación que usa el resto de los grises.
+            return mensaje_recordatorio_fin_de_mes(self.conn, id_profesional, periodo)
         if color in ("verde", "amarillo", "violeta", "gris"):
             return mensaje_envio_liquidacion(self.conn, id_profesional, periodo)
         return ""

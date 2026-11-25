@@ -11,6 +11,7 @@ from app.negocio.mensajeria import (
     marcar_mensaje_aislada_generado,
     marcar_recordatorio_deuda_x_generado,
     marcar_recordatorio_mensajeria_generado,
+    recordatorio_mensajeria_ya_generado,
 )
 from app.negocio.pagos import crear_plan_pago_historico
 from app.repositorio.registro import obtener_repositorio
@@ -110,8 +111,9 @@ def test_gris_pasa_a_bordo_cerca_de_fin_de_mes_con_reserva_regular_activa(conn):
 
 def test_bordo_no_depende_de_deuda_ni_de_plan(conn):
     """Pedido explícito de la clienta al descartar la vieja reactivación a
-    rojo: bordó aplica a CUALQUIER profesional R con reserva regular
-    activa, aunque tenga deuda y un plan de pago vigente."""
+    rojo: bordó aplica a CUALQUIER profesional R, aunque tenga deuda y
+    un plan de pago vigente (acá además con reserva regular activa,
+    para confirmar que esa condición tampoco cambia nada)."""
     p = _crear_r(conn, saldo_anterior=0, saldo_actual=10000)
     _dar_reserva_regular_activa(conn, p["IdProfesional"])
     crear_plan_pago_historico(
@@ -134,12 +136,17 @@ def test_gris_no_pasa_a_bordo_lejos_de_fin_de_mes(conn):
     assert color_profesional(conn, p, PERIODO) == "gris"
 
 
-def test_gris_no_pasa_a_bordo_sin_reserva_regular_activa(conn):
+def test_gris_pasa_a_bordo_sin_reserva_regular_activa(conn):
+    """Pedido explícito de la clienta, ronda posterior a la que agregó
+    bordó: "la idea es que se active el recordatorio en bordó para
+    todos los profesionales de esa categoría" — se sacó la condición de
+    "reserva regular activa" con la que se armó la primera vez, bordó
+    ya no depende de si el profesional sigue reservando o no."""
     p = _crear_r(conn, saldo_anterior=0)
     emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
     marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
     _fijar_fecha(conn, "2026-08-28")
-    assert color_profesional(conn, p, PERIODO) == "gris"
+    assert color_profesional(conn, p, PERIODO) == "bordo"
 
 
 def test_bordo_vuelve_a_gris_tras_generar_el_recordatorio(conn):
@@ -151,6 +158,38 @@ def test_bordo_vuelve_a_gris_tras_generar_el_recordatorio(conn):
     assert color_profesional(conn, p, PERIODO) == "bordo"
     marcar_recordatorio_mensajeria_generado(conn, p["IdProfesional"], PERIODO)
     assert color_profesional(conn, p, PERIODO) == "gris"
+
+
+def test_recordatorio_mensajeria_ya_generado_distingue_gris_que_fue_bordo(conn):
+    """Pedido explícito de la clienta: un reenvío manual (botón "Generar
+    texto") sobre un gris que ya pasó por bordó este período tiene que
+    seguir generando el mensaje de recordatorio de fin de mes, no el de
+    envío de liquidación que usa el resto de los grises — este helper es
+    lo que distingue un caso del otro."""
+    p = _crear_r(conn, saldo_anterior=0)
+    emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
+    marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
+    _fijar_fecha(conn, "2026-08-28")
+    assert color_profesional(conn, p, PERIODO) == "bordo"
+    assert recordatorio_mensajeria_ya_generado(conn, p["IdProfesional"], PERIODO) is False
+
+    marcar_recordatorio_mensajeria_generado(conn, p["IdProfesional"], PERIODO)
+    assert color_profesional(conn, p, PERIODO) == "gris"
+    assert recordatorio_mensajeria_ya_generado(conn, p["IdProfesional"], PERIODO) is True
+
+
+def test_recordatorio_mensajeria_ya_generado_falso_para_un_gris_que_nunca_fue_bordo(conn):
+    p = _crear_r(conn, saldo_anterior=0)
+    emitir_liquidacion(conn, id_profesional=p["IdProfesional"], periodo=PERIODO)
+    marcar_estado_envio(conn, id_profesional=p["IdProfesional"], periodo=PERIODO, enviada=True)
+    _fijar_fecha(conn, "2026-08-01")  # lejos de fin de mes: gris, nunca pasó por bordó
+    assert color_profesional(conn, p, PERIODO) == "gris"
+    assert recordatorio_mensajeria_ya_generado(conn, p["IdProfesional"], PERIODO) is False
+
+
+def test_recordatorio_mensajeria_ya_generado_falso_sin_ningun_estado_del_periodo(conn):
+    p = _crear_r(conn, saldo_anterior=0)
+    assert recordatorio_mensajeria_ya_generado(conn, p["IdProfesional"], PERIODO) is False
 
 
 def test_plazo_extendido_vigente_con_deuda_es_violeta(conn):

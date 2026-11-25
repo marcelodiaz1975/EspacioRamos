@@ -407,6 +407,49 @@ def test_generar_texto_bordo_pasa_a_gris(qtbot, conn):
     assert _color(conn, id_prof) == "gris"
 
 
+def test_generar_texto_reenvio_desde_gris_que_fue_bordo_repite_el_mensaje_de_recordatorio(qtbot, conn):
+    """Pedido explícito de la clienta: un reenvío manual (clic en
+    "Generar texto" sobre un gris que ya pasó por bordó este período)
+    tiene que seguir generando el mensaje de recordatorio de fin de mes
+    (con los saldos vigentes al momento del reenvío), no el mensaje de
+    envío de liquidación que usa el resto de los grises."""
+    id_prof = _crear_profesional(conn, saldo=0)
+    id_consultorio = _crear_consultorio(conn)
+    obtener_repositorio(conn, "ReservaRegular").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, DiaSemana="Lunes",
+        HoraInicio=10, HoraFin=12, VigenciaInicio="2026-01-01", VigenciaFin=None,
+    )
+    periodo = periodo_actual(conn)
+    emitir_liquidacion(conn, id_profesional=id_prof, periodo=periodo)
+    marcar_estado_envio(conn, id_profesional=id_prof, periodo=periodo, enviada=True)
+    anio, mes = (int(p) for p in periodo.split("-"))
+    conn.execute(
+        "UPDATE Configuracion SET ModoFechaFicticia = 1, FechaFicticia = ? WHERE IdConfiguracion = 1",
+        (ultimo_dia_mes(anio, mes).isoformat(),),
+    )
+    conn.commit()
+
+    pantalla = _PanelCentroMensajeria(conn)
+    qtbot.addWidget(pantalla)
+    _set_filtro(pantalla, "todos")
+    fila = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_prof))
+    pantalla.tabla.cellWidget(fila, 6).click()
+    assert _color(conn, id_prof) == "gris"
+
+    # Saldo cambia entre el primer y el segundo "Generar texto" — el
+    # reenvío tiene que reflejar el saldo vigente, no el de la primera vez.
+    obtener_repositorio(conn, "Profesional").actualizar(id_prof, SaldoCuentaAnterior=-500)
+
+    pantalla.actualizar()
+    fila = pantalla._profesionales.index(next(p for p in pantalla._profesionales if p["IdProfesional"] == id_prof))
+    pantalla.tabla.cellWidget(fila, 6).click()
+
+    assert "MENSAJE AUTOMATICO" in pantalla.texto_mensaje.toPlainText()
+    assert "ESTADO DE CUENTA ACTUAL" in pantalla.texto_mensaje.toPlainText()
+    assert "500" in pantalla.texto_mensaje.toPlainText()
+    assert _color(conn, id_prof) == "gris"
+
+
 def test_generar_texto_copia_al_portapapeles(qtbot, conn, monkeypatch):
     _crear_profesional(conn, saldo=0)
     pantalla = _PanelCentroMensajeria(conn)

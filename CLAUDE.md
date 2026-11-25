@@ -1294,3 +1294,128 @@ bucket_crudo`, `test_al_guardar_un_a_sin_tocar_nada_no_pregunta_ni_
 pisa_el_bucket_crudo`). pyflakes limpio en `app/negocio/pagos.py`,
 `app/gui/widgets/resumen_saldo.py`, `app/gui/pantallas/profesionales.py`,
 `app/gui/crud_generico.py` y los dos archivos de test tocados.
+
+## Centro de mensajería: bordó primero en el orden, sin condición de reserva regular activa, y reenvío manual sin perder el tipo de mensaje
+
+Tres pedidos de la clienta sobre el mismo color, entregados en tres
+mensajes consecutivos que hay que leer en conjunto (los últimos
+corrigen/afinan a los primeros):
+
+> 1. "Solapa 'Centro de mensajería' * Los profesionales que se ponen en
+>    bordó, el recordatorio cercano a fin de mes, que se pongan arriba
+>    de todo, luego al cliquear el check que se bajen a gris"
+> 2. "Perdón, no al tocar el check, sino al generar el mensaje que se
+>    bajen a gris, no a verde" (corrección al punto 1: el disparador no
+>    es el check de "Enviada", es el botón "Generar texto")
+> 3. "Y también veo profesionales categoría R que estaban en gris y no
+>    en bordó, la idea es que se active el recordatorio en bordó para
+>    todos los profesionales de esa categoría."
+> 4. (misma ronda) "Y una vez que se genera el texto, cuando pasa de
+>    bordó a gris, que sea el mensaje en bordó (actualizado con los
+>    nuevos saldos si hace falta) que se vuelva a generar, no el
+>    mensaje de gris. Si esto genera algún conflicto, el tipo de mensaje
+>    digo, que siga en bordó, pero que el profesional que se pincha en
+>    generar mensaje que baje en la tabla y quede luego de los azules
+>    de las horas aisladas." (la clienta ofrece una alternativa de
+>    respaldo — reordenar en vez de cambiar el mensaje — solo por si la
+>    primera generaba algún problema; no hizo falta, ver abajo)
+
+### Orden: bordó primero de todos (punto 1)
+
+`_ORDEN_COLOR` (`app/gui/pantallas/mensajeria.py`) pasa "bordo" al
+primer lugar de la tupla (antes estaba sobre el final, cerca de
+marrón/gris) — el recordatorio de fin de mes es urgente y tiene que
+verse antes que cualquier otro color.
+
+### Investigado antes de tocar nada: el botón "Generar texto" ya bajaba a gris correctamente (punto 2)
+
+El punto 2 corrige una primera implementación de este mismo pedido:
+arranqué asumiendo que el disparador era el check "Enviada" (como
+decía el mensaje original) y armé un caso especial ahí — la clienta
+interrumpió para aclarar que el disparador real es el botón "Generar
+texto", no el check. Se revirtió ese caso especial antes de que
+llegara a tocar ningún test ni a comitearse.
+
+Investigado con un script offscreen que clickea el botón real
+"Generar texto" de un profesional bordó: ya bajaba a gris
+correctamente, sin ningún cambio de código (`_texto_para_boton`, rama
+`bordo`, ya llamaba a `marcar_recordatorio_mensajeria_generado` tras
+armar el mensaje). Confirmado además por prueba estructural: en
+`color_profesional`, una vez que `EstadoEnvio == "Enviada"` para R, la
+función devuelve bordó o gris DENTRO de ese mismo bloque — nunca puede
+caer al chequeo de "verde" más abajo, así que un salto a verde desde
+bordó (lo que la clienta decía NO querer) era estructuralmente
+imposible con este código. No hacía falta tocar nada acá — el bug real
+que la clienta estaba viendo era el del punto 3.
+
+### Bordó para CUALQUIER profesional R, sin mirar reserva regular (punto 3, el fix real)
+
+`_debe_recordar_fin_de_mes` (`app/negocio/mensajeria.py`) tenía, desde
+la ronda en que se armó por primera vez, una condición extra adentro:
+solo pasaba a bordó un profesional con una `ReservaRegular` vigente a
+la fecha de hoy (`_reserva_regular_activa`, duplicado del helper
+mismo-nombre de `panel_control.py`, sin relación entre los dos
+módulos). Esa condición nunca fue pedida para el caso general — era un
+criterio razonable de la primera vuelta de este pedido, que la clienta
+ahora pide sacar explícitamente: "la idea es que se active el
+recordatorio en bordó para todos los profesionales de esa categoría".
+Se elimina la condición y, de paso, la función `_reserva_regular_
+activa` completa de este módulo (sin otro uso). El resto de las
+condiciones de bordó no cambia: liquidación ya Enviada, dentro de
+`DiasAntesFinMesRecordatorioGeneral` días de fin de mes, recordatorio
+no generado todavía este período.
+
+### Reenvío manual desde un gris que ya fue bordó: mismo mensaje, saldos vigentes (punto 4)
+
+Al generar el texto de un bordó, el profesional pasa a gris para el
+resto del período (mecanismo sin cambios, ver arriba) — pero un gris
+que YA pasó por bordó sigue siendo distinto de un gris que nunca pasó
+por bordó: antes de este pedido, un segundo click en "Generar texto"
+sobre ESE MISMO profesional (ya en gris) generaba el mensaje de envío
+de liquidación (el que usa el resto de los grises/verdes/amarillos/
+violetas), perdiendo el mensaje de recordatorio. La clienta pidió que
+un reenvío manual siga generando el mensaje de recordatorio de fin de
+mes, actualizado con los saldos que tenga el profesional en ese
+momento (no el que tenía la primera vez).
+
+`recordatorio_mensajeria_ya_generado(conn, id_profesional, periodo)`,
+nueva en `app/negocio/mensajeria.py`: lee `EstadoMensajeriaPeriodo.
+RecordatorioMensajeriaGenerado` para ese profesional/período — `True`
+si y solo si ya pasó por bordó alguna vez en este período (el caso
+que importa acá, el que sigue en gris por eso). `_texto_para_boton`
+(`app/gui/pantallas/mensajeria.py`) suma, antes de la rama genérica de
+grises, un caso para `color == "gris" and recordatorio_mensajeria_ya_
+generado(...)`: en ese caso devuelve `mensaje_recordatorio_fin_de_mes`
+de nuevo (la misma función que usa bordó — ya lee los saldos en vivo,
+no hace falta nada especial para que refleje el saldo vigente al
+momento del reenvío) en vez de `mensaje_envio_liquidacion`. Un gris
+que NUNCA pasó por bordó (lejos de fin de mes, o directamente nunca
+tuvo el flag) sigue yendo por la rama de siempre, sin cambios.
+
+No hizo falta la alternativa de respaldo que ofreció la clienta
+(mantener el color en bordó y solo reordenar en la tabla) — distinguir
+el tipo de mensaje por el flag ya existente
+(`RecordatorioMensajeriaGenerado`) resuelve el pedido sin ningún
+conflicto ni tener que tocar `color_profesional`/`_ORDEN_COLOR` de
+nuevo.
+
+Tests nuevos en `tests/test_mensajeria_negocio.py`
+(`test_recordatorio_mensajeria_ya_generado_distingue_gris_que_fue_
+bordo`, `test_recordatorio_mensajeria_ya_generado_falso_para_un_gris_
+que_nunca_fue_bordo`, `test_recordatorio_mensajeria_ya_generado_falso_
+sin_ningun_estado_del_periodo`) y renombrado/invertido
+`test_gris_no_pasa_a_bordo_sin_reserva_regular_activa` ->
+`test_gris_pasa_a_bordo_sin_reserva_regular_activa`. En
+`tests/test_gui_mensajeria.py`:
+`test_generar_texto_reenvio_desde_gris_que_fue_bordo_repite_el_
+mensaje_de_recordatorio` (dos clicks reales en "Generar texto" sobre
+el mismo profesional, cambiando el saldo entre uno y otro, confirma
+que el segundo mensaje sigue siendo el de recordatorio y refleja el
+saldo nuevo).
+
+Suite completa tras esta ronda: pyflakes limpio en todo `app/`/`tests/`.
+`tests/test_mensajeria_negocio.py`/`tests/test_gui_mensajeria.py`: solo
+los 3 fallos ya documentados del reloj real del sandbox cerca de fin de
+mes (ver "Fallos conocidos del sandbox/contenedor" más arriba) —
+confirmado con `git stash` que reproducen igual sin los cambios de esta
+ronda.
