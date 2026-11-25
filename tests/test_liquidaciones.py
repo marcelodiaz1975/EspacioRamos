@@ -342,6 +342,47 @@ def test_aisladas_mes_en_curso_y_mes_anterior(conn, consultorio):
     assert liquidacion.total_aisladas_mes_anterior == pytest.approx(2 * VALOR_HORA_AISLADA * 1.10)
 
 
+def test_aislada_imputada_al_periodo_siguiente_no_se_cuenta_en_el_mes_de_su_fecha(conn, consultorio):
+    """Bug real reportado por la clienta (caso testigo R51 Laura
+    Garrido): una reserva aislada fechada DENTRO del mes que se está
+    calculando, pero con `PeriodoImputado` explícito al mes siguiente
+    (el default de "Período a imputar" para categoría R, ver
+    `_resolver_periodo_imputar` en `app.gui.pantallas.reservas`), no
+    tiene que contarse en la liquidación del mes de su fecha aunque esa
+    liquidación se recalcule/reemita después de creada — antes de este
+    fix, `_aisladas_periodo` solo miraba la fecha real y nunca leía
+    `PeriodoImputado`, así que la igual la contaba en agosto."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-23",
+        HoraInicio=13, HoraFin=18, Estado="Confirmada", AplicaRecargo=0,
+        PeriodoImputado="2026-09",
+    )
+    liquidacion_agosto = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion_agosto.total_aisladas_mes_en_curso == 0.0
+    assert liquidacion_agosto.total_aisladas_mes_anterior == 0.0
+
+    liquidacion_septiembre = calcular_liquidacion(conn, id_profesional=id_prof, periodo="2026-09")
+    assert liquidacion_septiembre.total_aisladas_mes_en_curso == 0.0
+    assert liquidacion_septiembre.total_aisladas_mes_anterior == pytest.approx(5 * VALOR_HORA_AISLADA)
+
+
+def test_aislada_imputada_al_periodo_actual_se_cuenta_pese_a_la_de_periodo_siguiente(conn, consultorio):
+    """Mismo escenario que el test de arriba, pero confirmando que una
+    aislada con `PeriodoImputado` explícito al MISMO mes de su fecha
+    ("actual", la opción no-default) sigue contándose en "mes en
+    curso" como siempre — el fix no excluye de más, solo la que
+    explícitamente dice que es para otro período."""
+    id_prof = _profesional_con_reserva_lunes(conn, consultorio, horas=2)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=consultorio, Fecha="2026-08-23",
+        HoraInicio=13, HoraFin=18, Estado="Confirmada", AplicaRecargo=0,
+        PeriodoImputado="2026-08",
+    )
+    liquidacion = calcular_liquidacion(conn, id_profesional=id_prof, periodo=PERIODO)
+    assert liquidacion.total_aisladas_mes_en_curso == pytest.approx(5 * VALOR_HORA_AISLADA)
+
+
 def test_aislada_usa_el_valor_congelado_no_el_vigente_del_consultorio(conn, consultorio):
     """Bug real reportado por la clienta: una aislada tomada a fin de
     julio pero imputada/incluida en la liquidación de agosto (vía

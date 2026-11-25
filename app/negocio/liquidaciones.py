@@ -800,10 +800,36 @@ def _calcular_descuento_licencias(
 # --------------------------------------------------------------------------- aisladas
 
 def _aisladas_periodo(
-    conn: sqlite3.Connection, ids: list[int], anio: int, mes: int, recargo_pct: float,
+    conn: sqlite3.Connection, ids: list[int], anio: int, mes: int, recargo_pct: float, periodo_objetivo: str,
 ) -> list[ItemAislada]:
     """Un ítem por ReservaAislada confirmada del período (no un total): el
     PDF de liquidación detalla cada una con fecha, horario y consultorio.
+
+    `anio`/`mes` siguen acotando por la fecha REAL de la reserva (mes en
+    curso o mes anterior, según desde dónde se llame) — eso decide en
+    qué bloque del PDF cae ("a trabajar" vs "trabajada") y de qué mes es
+    la tarifa congelada. `periodo_objetivo` (el período que se está
+    calculando, "AAAA-MM") es un filtro ADICIONAL: bug real reportado
+    por la clienta (caso testigo R51 Laura Garrido) — una reserva
+    aislada creada con "Período a imputar" en "Período siguiente" (el
+    default para categoría R, `_resolver_periodo_imputar` en
+    `app.gui.pantallas.reservas`) de todas formas se contaba en la
+    liquidación del mes de SU FECHA si esa liquidación se volvía a
+    calcular/emitir después de creada — `ReservaAislada.PeriodoImputado`
+    quedaba grabado en la tabla (y se mostraba en la columna "Período
+    imputado") pero el motor de cálculo nunca lo leía, solo miraba la
+    fecha real. Ahora una fila con `PeriodoImputado` explícito SOLO
+    entra en el cálculo del período que dice ese campo (el `WHERE`
+    exige que coincida con `periodo_objetivo`) — si coincide con el mes
+    de su fecha (caso "actual", el default de categoría A/B y la opción
+    no-default de R/E) cae en "mes en curso" como siempre; si es el mes
+    siguiente (default de R/E) cae en "mes anterior" DEL PERÍODO
+    SIGUIENTE, nunca en el período de su propia fecha. Una fila sin
+    `PeriodoImputado` (dato viejo, de antes de que existiera esta
+    columna) no se filtra por `periodo_objetivo` en absoluto
+    (`PeriodoImputado IS NULL` pasa el `WHERE` siempre) — sigue el
+    criterio de siempre, exclusivamente por `Fecha` dentro del mes que
+    ya acota `anio`/`mes`.
 
     El monto usa `ra.ValorHoraAlMomentoDeLaReserva` (congelado al crear
     la reserva, ver `crear_reserva_aislada`) en vez de `Consultorio.
@@ -827,8 +853,9 @@ def _aisladas_periodo(
         FROM ReservaAislada ra
         JOIN Consultorio c ON c.IdConsultorio = ra.IdConsultorio
         WHERE ra.IdProfesional IN ({placeholders}) AND ra.Estado = 'Confirmada' AND ra.Fecha LIKE ?
+              AND (ra.PeriodoImputado IS NULL OR ra.PeriodoImputado = ?)
         """,
-        (*ids, prefijo + "%"),
+        (*ids, prefijo + "%", periodo_objetivo),
     ).fetchall()
 
     items = []
@@ -927,8 +954,8 @@ def calcular_liquidacion(conn: sqlite3.Connection, *, id_profesional: int, perio
     descuento_vacaciones = _calcular_descuento_vacaciones(conn, ids, primer_dia_periodo, ultimo_dia_periodo)
     descuento_licencias = _calcular_descuento_licencias(conn, ids, primer_dia_periodo, ultimo_dia_periodo)
 
-    aisladas_mes_anterior = _aisladas_periodo(conn, ids, anio_ant, mes_ant, recargo_pct)
-    aisladas_mes_en_curso = _aisladas_periodo(conn, ids, anio, mes, recargo_pct)
+    aisladas_mes_anterior = _aisladas_periodo(conn, ids, anio_ant, mes_ant, recargo_pct, periodo)
+    aisladas_mes_en_curso = _aisladas_periodo(conn, ids, anio, mes, recargo_pct, periodo)
 
     cargos_especiales = obtener_repositorio(conn, "CargoEspecial").listar(
         IdProfesional=id_profesional, PeriodoImputado=periodo
