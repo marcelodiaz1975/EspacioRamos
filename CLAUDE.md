@@ -1183,3 +1183,114 @@ de `app/` tocados (`app/db/init_db.py`, `app/db/migraciones.py`,
 `app/gui/pantallas/pagos.py`, `app/gui/pantallas/profesionales.py`,
 `app/gui/widgets/resumen_saldo.py`, `app/negocio/mensajes.py`,
 `app/negocio/pagos.py`) y los nueve de test tocados.
+
+## Saldo actual de categoría A: el diálogo de Profesionales y el historial de pagos no usaban el cálculo en vivo
+
+Bug real reportado por la clienta, ronda siguiente a la redefinición de
+saldos de más arriba (caso testigo A19 Marcela La Regina):
+
+> "A19- Marcela La Regina : Figura en profesionales $147.686 como
+> saldo actual; en la grilla de mensajería $163.540. De los dos
+> valores el correcto es el último. En la tabla de pagos también
+> tendría que actualizar la información, pero ante todo repasame la
+> lógica por favor."
+
+Investigado antes de tocar nada: para categoría A nada acredita nunca
+el bucket crudo `Profesional.SaldoCuentaActual` (no hay liquidación
+mensual propia) — por eso ese número se calcula EN VIVO
+(`movimiento_periodo_aislada`: reservas aisladas + llaves + ítems
+libres − pagos del período). `saldo_actual_mostrado` (la función
+compartida que ya usan Centro de mensajería/Pagos/Estado de cuenta/
+Cargos especiales) ya resolvía esto bien desde la ronda anterior. Pero
+quedaron DOS lugares con la fórmula vieja (suma cruda de los dos
+campos persistidos, sin el caso especial de A):
+
+1. El diálogo Nuevo/Editar de Profesionales (`_al_abrir_dialogo`,
+   sumado en la ronda anterior) calculaba el combinado a mostrar/editar
+   leyendo los dos campos de texto ya precargados, en vez de llamar a
+   `saldo_actual_mostrado` — para un R da lo mismo (el bucket crudo YA
+   es el valor real), para un A da el bucket crudo obsoleto (normalmente
+   $0 o un valor viejo) en vez del cálculo en vivo.
+2. `registrar_pago`/`modificar_pago` (`app/negocio/pagos.py`) calculaban
+   el snapshot "Saldo antes del pago"/"Saldo después del pago" que
+   queda guardado en `HistorialPagos` con la misma suma cruda —
+   cualquier pago histórico de un profesional A tiene esos dos valores
+   mal, el pedido de "en la tabla de pagos también tendría que
+   actualizar la información".
+
+### `saldo_actual_mostrado` se muda a la capa de negocio
+
+La función vivía en `app/gui/widgets/resumen_saldo.py` (un módulo de
+GUI) a pesar de ser lógica de negocio pura, sin ningún uso de Qt —
+quedó mal ubicada ahí desde que se creó. `app/negocio/pagos.py`
+necesita poder llamarla (para el fix de `registrar_pago`/
+`modificar_pago`) y esa capa de negocio no puede depender de la GUI, así
+que se mudó la función a `app/negocio/pagos.py` (justo debajo de
+`_aplicar_pago`, con el mismo docstring) — `app/gui/widgets/
+resumen_saldo.py` la reexporta (`from app.negocio.pagos import
+saldo_actual_mostrado`) para no tener que tocar ningún llamador de
+pantallas (Centro de mensajería, Estado de cuenta de Liquidación
+mensual, Registrar pagos, Cargos especiales ya la importaban desde ahí).
+
+### `registrar_pago`/`modificar_pago`: `saldo_previo`/`nuevo_saldo` sin re-consultar el cálculo en vivo
+
+Sustituir la suma cruda por `saldo_actual_mostrado(conn, profesional)`
+en el punto donde ya se calculaba `saldo_previo` resuelve el caso de
+`registrar_pago` directo — pero NO alcanza con volver a llamar a
+`saldo_actual_mostrado` después de aplicar el pago para obtener
+`nuevo_saldo`: para un A, `movimiento_periodo_aislada` suma los pagos
+ya imputados a ese período consultando `HistorialPagos` directo, y el
+pago que se está registrando/modificando todavía no está insertado (o
+todavía tiene su Monto VIEJO) en ese momento — una segunda consulta
+daría un valor viejo, no el real. Se usa en cambio la identidad
+matemática ya confirmada por los tests existentes ("el combinado
+cambia en exactamente el monto del pago, sin importar a qué campo se
+aplique"): `nuevo_saldo = saldo_previo + monto` directo, sin volver a
+calcular nada — funciona igual para todas las categorías y de paso
+elimina una consulta redundante a `Profesional` que ya no hacía falta.
+
+En `modificar_pago` hace falta un paso extra: revertir el impacto en
+los campos crudos (ya existía) NO alcanza para que "Saldo antes de
+este pago" excluya la versión VIEJA del pago que se está modificando,
+porque para un A esa fila SIGUE en `HistorialPagos` con su Monto viejo
+hasta el `repo.actualizar` final de la función — el cálculo en vivo la
+sigue contando. Se la pone en `Monto=0` momentáneamente antes de
+calcular `saldo_previo` (el `repo.actualizar` final la deja con el
+Monto real de todas formas, así que no hace falta revertir este paso
+aparte). Sin este paso, "Saldo antes de este pago" de un A quedaría
+contando la versión vieja del propio pago que se está corrigiendo.
+
+### Profesionales: mismo fix en el diálogo, con un cuidado extra al comparar para la alerta de ajuste manual
+
+`_al_abrir_dialogo` pasa a llamar `saldo_actual_mostrado(conn, dialogo.
+registro)` en vez de sumar a mano los dos campos de texto ya
+precargados — `_DialogoRegistro` (`app/gui/crud_generico.py`) suma el
+atributo `self.registro` (el registro con el que se abrió, `None` en
+un alta nueva) para que `al_abrir_dialogo` pueda acceder al registro
+completo, no solo a los campos propios del diálogo.
+
+`_al_guardar_profesional` también necesitaba un ajuste, no solo
+cambiar qué función llama: la comparación "¿hubo un ajuste manual
+real?" (para decidir si preguntar y si hay que pisar el bucket crudo)
+NO puede hacerse comparando el bucket DERIVADO (combinado ingresado
+menos anterior) contra el bucket crudo ya guardado — para un A esos dos
+números son casi siempre distintos aunque no se haya tocado nada
+(el bucket crudo guardado no significa nada para un A, el real es el
+cálculo en vivo), lo que disparaba la alerta en falso y pisaba el
+bucket crudo con el valor en vivo con solo abrir y guardar el diálogo
+sin cambiar nada. La comparación correcta es "combinado que se mostró
+al abrir vs. combinado que quedó al guardar" (recalculando
+`saldo_actual_mostrado(conn, registro)` fresco adentro de
+`_al_guardar_profesional`, no reutilizando nada del diálogo) — si no
+cambió, se conserva el bucket crudo tal cual estaba, sin pisarlo.
+
+Tests nuevos: `tests/test_pagos.py` (+2:
+`test_registrar_pago_de_un_a_usa_el_calculo_en_vivo_no_el_bucket_
+crudo`, `test_modificar_pago_de_un_a_usa_el_calculo_en_vivo_no_el_
+bucket_crudo` — reproducen el caso real con los montos de Marcela La
+Regina). `tests/test_profesionales.py` (+2:
+`test_dialogo_saldo_actual_de_un_a_muestra_el_calculo_en_vivo_no_el_
+bucket_crudo`, `test_al_guardar_un_a_sin_tocar_nada_no_pregunta_ni_
+pisa_el_bucket_crudo`). pyflakes limpio en `app/negocio/pagos.py`,
+`app/gui/widgets/resumen_saldo.py`, `app/gui/pantallas/profesionales.py`,
+`app/gui/crud_generico.py` y los dos archivos de test tocados.

@@ -19,6 +19,7 @@ import sqlite3
 from datetime import datetime
 
 from app.negocio.dias import fecha_actual, periodo_actual, sumar_meses
+from app.negocio.mensajes import movimiento_periodo_aislada
 from app.repositorio.registro import obtener_repositorio
 
 TIPOS_CARGO = ("Débito", "Crédito")
@@ -100,8 +101,8 @@ def _aplicar_pago(
     campo imputado y además cancelaba una deuda del OTRO campo (ver
     `docs/historial/pagos.md`, "saldos cruzados") — eso dejó de hacer
     falta: "Saldo actual" pasa a MOSTRARSE siempre combinado (`Saldo
-    anterior` + lo acumulado del período en curso, ver `app.gui.widgets.
-    resumen_saldo.saldo_actual_mostrado`), así que un crédito en un
+    anterior` + lo acumulado del período en curso, ver
+    `saldo_actual_mostrado` más abajo), así que un crédito en un
     campo que cubre una deuda del otro YA se ve reflejado en ese
     combinado sin necesidad de mezclar los dos campos guardados —
     mezclarlos, al revés, terminaba destruyendo la separación real
@@ -121,6 +122,37 @@ def _aplicar_pago(
     return 0.0, impacto
 
 
+def saldo_actual_mostrado(conn: sqlite3.Connection, profesional: sqlite3.Row) -> float:
+    """"Saldo actual" que corresponde mostrar para un profesional: el
+    resultado en vivo de cómo está la cuenta, definición de la clienta
+    (caso testigo: Vanesa Moreno, ver CLAUDE.md) — "Saldo anterior" (lo
+    que quedó del mes anterior) MÁS lo propio del período en curso,
+    nunca el bucket del período solo.
+
+    Bug real reportado por la clienta: para categoría A no hay
+    liquidación mensual propia (ver `app.negocio.liquidaciones.
+    CATEGORIAS_CON_LIQUIDACION_MENSUAL`), así que nada acredita nunca
+    `Profesional.SaldoCuentaActual` — el bucket propio de este período
+    se calcula en vivo (`movimiento_periodo_aislada`, mismo criterio
+    EXACTO que usa Centro de mensajería); para el resto, el campo
+    persistido ya es el bucket correcto (se acredita al emitir la
+    liquidación, para R, o al registrar un pago/cargo).
+
+    Vivía en `app.gui.widgets.resumen_saldo` (un módulo de GUI) a pesar
+    de ser lógica de negocio pura, sin ningún uso de Qt — se mudó para
+    acá (caso real reportado: A19 Marcela La Regina, ver CLAUDE.md)
+    porque `registrar_pago`/`modificar_pago` también la necesitan para
+    el snapshot "Saldo antes/después del pago" que guardan en
+    `HistorialPagos`, y ese módulo de negocio no puede depender de la
+    capa de GUI. `app.gui.widgets.resumen_saldo` la reexporta para no
+    tener que tocar ningún llamador de pantallas."""
+    if profesional["CategoriaProfesional"] == "A":
+        bucket = movimiento_periodo_aislada(conn, profesional["IdProfesional"], periodo_actual(conn))
+    else:
+        bucket = profesional["SaldoCuentaActual"] or 0.0
+    return (profesional["SaldoCuentaAnterior"] or 0.0) + bucket
+
+
 def registrar_pago(
     conn: sqlite3.Connection, *, id_profesional: int, monto: float, fecha: str | None = None,
     medio_pago: str | None = None, cuenta_receptora: str | None = None,
@@ -135,9 +167,9 @@ def registrar_pago(
     en curso afecta SaldoCuentaAnterior (DC-09 §8); si no,
     SaldoCuentaActual — un pago nunca toca los dos campos a la vez
     (ver `_aplicar_pago`): "Saldo actual" se MUESTRA siempre combinado
-    (`app.gui.widgets.resumen_saldo.saldo_actual_mostrado`), así que un
-    pago grande que deja un crédito en el campo imputado ya se refleja
-    bien ahí sin necesidad de mezclar los dos campos guardados.
+    (`saldo_actual_mostrado`), así que un pago grande que deja un
+    crédito en el campo imputado ya se refleja bien ahí sin necesidad
+    de mezclar los dos campos guardados.
 
     `fecha`, si no se pasa, toma la fecha de hoy (antes era un campo que
     cargaba el operador a mano; con el rediseño del formulario de Pagos
@@ -161,14 +193,25 @@ def registrar_pago(
     # según a qué período se imputaba el pago — daba un número
     # "incompleto" al mirar la fila sola, mismo problema que ya se
     # había corregido una vez para las etiquetas de arriba, ver
-    # `_actualizar_saldos` en la GUI).
-    saldo_previo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
+    # `_actualizar_saldos` en la GUI). `saldo_actual_mostrado` (no la
+    # suma cruda de los dos campos) porque para categoría A el bucket
+    # real no es el campo persistido sino el cálculo en vivo
+    # (`movimiento_periodo_aislada`) — bug real reportado por la
+    # clienta (A19 Marcela La Regina, ver CLAUDE.md).
+    saldo_previo = saldo_actual_mostrado(conn, profesional)
 
     impacto_anterior, impacto_actual = _aplicar_pago(conn, id_profesional, monto, periodo_imputado)
+    # El combinado siempre se mueve en exactamente `monto` (ver test_
+    # registrar_pago_saldo_antes_y_despues_combina_los_dos_periodos) —
+    # no hace falta volver a calcular `saldo_actual_mostrado` después de
+    # aplicar el pago: para un A, esa segunda llamada todavía no vería
+    # el efecto de ESTE pago en `movimiento_periodo_aislada` (recién se
+    # inserta en HistorialPagos más abajo), así que daría un valor
+    # viejo en vez del real.
+    nuevo_saldo = saldo_previo + monto
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     saldo_campo_nuevo = profesional[campo_objetivo] or 0.0
-    nuevo_saldo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
     es_mes_anterior = campo_objetivo == "SaldoCuentaAnterior"
 
     repo = obtener_repositorio(conn, "HistorialPagos")
@@ -229,17 +272,30 @@ def modificar_pago(
         SaldoCuentaAnterior=(profesional["SaldoCuentaAnterior"] or 0.0) - (pago["ImpactoSaldoAnterior"] or 0.0),
         SaldoCuentaActual=(profesional["SaldoCuentaActual"] or 0.0) - (pago["ImpactoSaldoActual"] or 0.0),
     )
+    # Para categoría A, el combinado se recalcula EN VIVO desde
+    # HistorialPagos (`saldo_actual_mostrado` -> `movimiento_periodo_
+    # aislada`) — revertir el impacto en los campos crudos (arriba) no
+    # alcanza para que "Saldo antes de este pago" excluya la versión
+    # VIEJA de este mismo pago, porque esta fila sigue en la tabla con
+    # su Monto viejo hasta el `repo.actualizar` de más abajo. Se la
+    # pone en 0 momentáneamente para que ese cálculo en vivo no la
+    # cuente — el `repo.actualizar` final la deja con el Monto real
+    # de todas formas, así que no hace falta revertir este paso.
+    repo.actualizar(id_pago, Monto=0.0)
 
     nuevo_monto = monto if monto is not None else pago["Monto"]
     nuevo_periodo = periodo_imputado if periodo_imputado is not None else pago["PeriodoImputado"]
     profesional = repo_prof.obtener(pago["IdProfesional"])
-    # Combinado de los dos períodos — mismo criterio que `registrar_pago`.
-    saldo_previo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
+    # Combinado de los dos períodos — mismo criterio que `registrar_pago`
+    # (`saldo_actual_mostrado`, no la suma cruda: bug real reportado por
+    # la clienta para categoría A, ver CLAUDE.md).
+    saldo_previo = saldo_actual_mostrado(conn, profesional)
 
     impacto_anterior, impacto_actual = _aplicar_pago(conn, pago["IdProfesional"], nuevo_monto, nuevo_periodo)
-
-    profesional = repo_prof.obtener(pago["IdProfesional"])
-    nuevo_saldo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
+    # Mismo motivo que en `registrar_pago`: el combinado se mueve en
+    # exactamente `nuevo_monto`, sin volver a calcular `saldo_actual_
+    # mostrado` (que para un A todavía no vería este pago modificado).
+    nuevo_saldo = saldo_previo + nuevo_monto
 
     repo.actualizar(
         id_pago, Monto=nuevo_monto,

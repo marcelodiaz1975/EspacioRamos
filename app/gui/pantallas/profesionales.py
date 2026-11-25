@@ -53,6 +53,7 @@ from app.negocio.documentacion_profesional import (
 from app.negocio.imagenes import CATEGORIA_OTRAS_IMAGENES, CATEGORIA_OTROS_DOCUMENTOS
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import opciones_lista
+from app.negocio.pagos import saldo_actual_mostrado
 from app.negocio.profesionales import (
     normalizar_cuit,
     opciones_tratamiento,
@@ -410,24 +411,22 @@ def _al_abrir_dialogo(dialogo) -> None:
     # cuenta actual" pasa a MOSTRAR/EDITAR el COMBINADO (anterior + lo
     # propio del período en curso) en vez del bucket crudo solo — ya no
     # hace falta la tercera fila "Saldo total" de solo lectura de una
-    # ronda anterior (se sacó). Al abrir el diálogo, la precarga ya dejó
-    # en el campo el bucket crudo tal cual está en la base (`_crear_
-    # entrada`) — se reemplaza por el combinado antes de mostrarlo;
-    # `_al_guardar_profesional` hace la cuenta inversa (combinado -
-    # anterior) para volver a persistir el bucket real.
+    # ronda anterior (se sacó).
+    #
+    # Bug real reportado por la clienta (caso A19 Marcela La Regina, ver
+    # CLAUDE.md): sumar a mano los dos campos crudos precargados (el
+    # bucket de `SaldoCuentaActual` tal cual está en la base) está mal
+    # para categoría A — nada acredita nunca ese campo para un A (no hay
+    # liquidación mensual propia), así que el bucket real es el cálculo
+    # EN VIVO que ya usa el resto del sistema (`saldo_actual_mostrado`,
+    # mismo criterio EXACTO que Centro de mensajería). Se usa esa misma
+    # función compartida en vez de la suma cruda — funciona igual para
+    # R (ahí el bucket crudo YA es el valor real) y corrige A.
     campo_saldo_actual = dialogo._entradas["SaldoCuentaActual"]
-    campo_saldo_anterior = dialogo._entradas["SaldoCuentaAnterior"]
-
-    def _a_numero(texto: str) -> float:
-        texto = texto.strip()
-        try:
-            return float(texto) if texto else 0.0
-        except ValueError:
-            return 0.0
-
-    bucket_inicial = _a_numero(campo_saldo_actual.text())
-    anterior_inicial = _a_numero(campo_saldo_anterior.text())
-    campo_saldo_actual.setText(str(bucket_inicial + anterior_inicial))
+    if dialogo.registro is not None:
+        campo_saldo_actual.setText(str(saldo_actual_mostrado(conn, dialogo.registro)))
+    else:
+        campo_saldo_actual.setText(str(0.0))
 
 
 def _al_guardar_profesional(valores: dict, registro: sqlite3.Row | None, conn: sqlite3.Connection) -> dict | None:
@@ -486,19 +485,34 @@ def _al_guardar_profesional(valores: dict, registro: sqlite3.Row | None, conn: s
             return None
 
     # "Saldo cuenta actual" vino del diálogo como el COMBINADO (anterior +
-    # bucket, ver `_al_abrir_dialogo`) — se vuelve al bucket real antes de
-    # guardar. Si el ajuste manual cambia alguno de los dos campos reales
-    # respecto a lo que el profesional ya tenía, se avisa que puede
-    # afectar su liquidación antes de confirmarlo (pedido explícito de la
-    # clienta) — solo tiene sentido ese aviso al EDITAR uno ya existente,
-    # un alta nueva no tiene ninguna liquidación que pueda verse afectada.
+    # lo propio del período en curso, ver `_al_abrir_dialogo` —
+    # `saldo_actual_mostrado`, no la suma cruda) — se vuelve al bucket
+    # real antes de guardar. Si el ajuste manual cambia alguno de los dos
+    # campos reales respecto a lo que el profesional ya tenía, se avisa
+    # que puede afectar su liquidación antes de confirmarlo (pedido
+    # explícito de la clienta) — solo tiene sentido ese aviso al EDITAR
+    # uno ya existente, un alta nueva no tiene ninguna liquidación que
+    # pueda verse afectada.
+    #
+    # La comparación usa el combinado (lo que se mostró al abrir el
+    # diálogo vs. lo que quedó en el campo al guardar), NO el bucket
+    # derivado — para categoría A, `saldo_actual_mostrado` calcula el
+    # bucket EN VIVO (`movimiento_periodo_aislada`), que normalmente NO
+    # coincide con el bucket crudo ya guardado (nada lo acredita nunca
+    # para un A). Comparar buckets derivados dispararía la alerta — y
+    # pisaría el campo crudo con el valor en vivo — con solo abrir y
+    # guardar sin tocar nada (bug real reportado por la clienta, caso
+    # A19 Marcela La Regina, ver CLAUDE.md).
     if "SaldoCuentaActual" in valores:
+        combinado_ingresado = valores.get("SaldoCuentaActual") or 0.0
         nuevo_anterior = valores.get("SaldoCuentaAnterior") or 0.0
-        nuevo_bucket = (valores.get("SaldoCuentaActual") or 0.0) - nuevo_anterior
         if registro is not None:
-            bucket_original = registro["SaldoCuentaActual"] or 0.0
+            combinado_inicial = saldo_actual_mostrado(conn, registro)
             anterior_original = registro["SaldoCuentaAnterior"] or 0.0
-            cambio_real = abs(nuevo_bucket - bucket_original) > 1e-6 or abs(nuevo_anterior - anterior_original) > 1e-6
+            cambio_real = (
+                abs(combinado_ingresado - combinado_inicial) > 1e-6
+                or abs(nuevo_anterior - anterior_original) > 1e-6
+            )
             if cambio_real:
                 respuesta = QMessageBox.question(
                     None, "Ajuste de saldo",
@@ -509,7 +523,13 @@ def _al_guardar_profesional(valores: dict, registro: sqlite3.Row | None, conn: s
                 )
                 if respuesta != QMessageBox.StandardButton.Yes:
                     return None
-        valores["SaldoCuentaActual"] = nuevo_bucket
+                valores["SaldoCuentaActual"] = combinado_ingresado - nuevo_anterior
+            else:
+                # Sin cambio real: se conserva el bucket crudo tal cual
+                # estaba (no se lo pisa con el valor en vivo de un A).
+                valores["SaldoCuentaActual"] = registro["SaldoCuentaActual"] or 0.0
+        else:
+            valores["SaldoCuentaActual"] = combinado_ingresado - nuevo_anterior
 
     return valores
 

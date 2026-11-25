@@ -141,6 +141,64 @@ def test_registrar_pago_saldo_antes_y_despues_combina_los_dos_periodos(conn, pro
     assert pago["SaldoNuevo"] == pytest.approx(81236 + 277292 - 70000)
 
 
+def test_registrar_pago_de_un_a_usa_el_calculo_en_vivo_no_el_bucket_crudo(conn):
+    """Bug real reportado por la clienta (caso A19 Marcela La Regina, ver
+    CLAUDE.md): para categoría A nada acredita nunca el bucket crudo
+    `SaldoCuentaActual` (no hay liquidación mensual propia) — el snapshot
+    "Saldo antes del pago" que guarda HistorialPagos sumaba ese bucket
+    crudo (obsoleto, normalmente $0) en vez del cálculo en vivo
+    (`movimiento_periodo_aislada`, el mismo que usa Centro de
+    mensajería)."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=163540,
+    )
+    id_a = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="La Regina", SaldoCuentaActual=0, SaldoCuentaAnterior=0,
+    )
+    periodo = periodo_actual(conn)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_a, IdConsultorio=id_consultorio, Fecha=f"{periodo}-10",
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+
+    id_pago, _ = registrar_pago(conn, id_profesional=id_a, monto=-163540, periodo_imputado=periodo)
+
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["SaldoAnterior"] == pytest.approx(163540)
+    assert pago["SaldoNuevo"] == pytest.approx(0)
+
+
+def test_modificar_pago_de_un_a_usa_el_calculo_en_vivo_no_el_bucket_crudo(conn):
+    """Mismo bug que el anterior, al MODIFICAR un pago: revertir el
+    impacto en los campos crudos (antes de recalcular) no alcanza para
+    que "Saldo antes de este pago" excluya la versión VIEJA de este
+    mismo pago, porque para un A el combinado se recalcula en vivo desde
+    HistorialPagos — esa fila sigue en la tabla con su Monto viejo hasta
+    el final de `modificar_pago`."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=163540,
+    )
+    id_a = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="La Regina", SaldoCuentaActual=0, SaldoCuentaAnterior=0,
+    )
+    periodo = periodo_actual(conn)
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_a, IdConsultorio=id_consultorio, Fecha=f"{periodo}-10",
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    id_pago, _ = registrar_pago(conn, id_profesional=id_a, monto=-100000, periodo_imputado=periodo)
+
+    modificar_pago(conn, id_pago, monto=-163540)
+
+    pago = obtener_repositorio(conn, "HistorialPagos").obtener(id_pago)
+    assert pago["SaldoAnterior"] == pytest.approx(163540)
+    assert pago["SaldoNuevo"] == pytest.approx(0)
+
+
 def test_registrar_pago_saldo_antes_del_pago_encadena_con_el_despues_del_pago_anterior(conn, profesional):
     """"Si en el mes se realiza un nuevo pago, 'Saldo antes del pago' va a
     mostrar el último 'Saldo después del pago' de ese mes" — sale solo de

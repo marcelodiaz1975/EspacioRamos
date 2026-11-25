@@ -938,6 +938,12 @@ class _DialogoRegistro(QDialog):
         super().__init__(parent)
         self.conn = conn
         self.campos = campos
+        # El registro con el que se abrió (None en un alta nueva) — gancho
+        # para que `al_abrir_dialogo` pueda recalcular algo que depende del
+        # registro completo, no solo de los campos del propio diálogo (ej.
+        # Profesionales: el saldo combinado de categoría A necesita el
+        # IdProfesional real, ver `_al_abrir_dialogo`).
+        self.registro = registro
         self.setWindowTitle(titulo)
         self._entradas: dict[str, QWidget] = {}
         self._etiquetas: dict[str, QLabel] = {}

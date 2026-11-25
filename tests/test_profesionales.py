@@ -465,6 +465,74 @@ def test_dialogo_saldo_actual_de_un_profesional_nuevo_arranca_en_cero(qtbot, con
     assert dialogo._entradas["SaldoCuentaAnterior"].text().strip() == ""
 
 
+def test_dialogo_saldo_actual_de_un_a_muestra_el_calculo_en_vivo_no_el_bucket_crudo(qtbot, conn):
+    """Bug real reportado por la clienta (caso A19 Marcela La Regina, ver
+    CLAUDE.md): para categoría A nada acredita nunca el bucket crudo
+    `SaldoCuentaActual` (no hay liquidación mensual propia) — el diálogo
+    sumaba ese bucket crudo (obsoleto) con el Anterior, dando un número
+    distinto al que mostraba Centro de mensajería (que sí usa el cálculo
+    en vivo, `movimiento_periodo_aislada`). Acá se repite el mismo
+    escenario con una reserva aislada pendiente y un bucket crudo
+    desactualizado, y el diálogo tiene que mostrar el valor EN VIVO."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=163540,
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="La Regina",
+        # Bucket crudo desactualizado (nada lo toca nunca para un A) —
+        # si el diálogo lo usara, daría un combinado distinto al real.
+        SaldoCuentaActual=0, SaldoCuentaAnterior=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha=f"{periodo_actual(conn)}-10",
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    dialogo = _DialogoRegistro(conn, _campos_profesional(conn), "Editar registro", registro=registro)
+    qtbot.addWidget(dialogo)
+    _al_abrir_dialogo(dialogo)
+
+    assert float(dialogo._entradas["SaldoCuentaActual"].text()) == pytest.approx(163540)
+
+
+def test_al_guardar_un_a_sin_tocar_nada_no_pregunta_ni_pisa_el_bucket_crudo(conn, monkeypatch):
+    """Mismo caso que el anterior, pero guardando sin tocar nada: como el
+    combinado mostrado (el cálculo en vivo) no coincide con el bucket
+    crudo persistido, comparar "bucket derivado vs. bucket original" en
+    `_al_guardar_profesional` dispararía la alerta en falso y pisaría el
+    bucket crudo con el valor en vivo con solo abrir y guardar — bug real
+    reportado por la clienta. La comparación correcta es "combinado
+    mostrado vs. combinado ingresado", no los buckets derivados."""
+    id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
+    id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
+    id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
+        IdUnidad=id_unidad, NumeroConsultorio=1, ValorHoraAisladaActual=163540,
+    )
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="La Regina", SaldoCuentaActual=0, SaldoCuentaAnterior=0,
+    )
+    obtener_repositorio(conn, "ReservaAislada").crear(
+        IdProfesional=id_prof, IdConsultorio=id_consultorio, Fecha=f"{periodo_actual(conn)}-10",
+        HoraInicio=10, HoraFin=11, Estado="Confirmada", AplicaRecargo=0,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: preguntas.append(a) or QMessageBox.StandardButton.No),
+    )
+    # Mismo combinado que se mostraría al abrir el diálogo (163540, el
+    # cálculo en vivo) — el operador no tocó nada.
+    valores = {"SaldoCuentaActual": 163540.0, "SaldoCuentaAnterior": 0.0}
+    resultado = _al_guardar_profesional(valores, registro, conn)
+
+    assert preguntas == []
+    assert resultado["SaldoCuentaActual"] == pytest.approx(0)  # el bucket crudo queda tal cual estaba
+
+
 def test_sugerencia_de_codigo_se_actualiza_al_cambiar_categoria(qtbot, conn):
     dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
     combo_categoria = dialogo._entradas["CategoriaProfesional"]
