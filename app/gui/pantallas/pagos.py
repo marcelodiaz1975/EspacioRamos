@@ -52,7 +52,7 @@ from app.negocio.dias import fecha_a_dia_semana, periodo_actual, periodo_anterio
 from app.negocio.formato import formatear_moneda, periodo_mm_aaaa
 from app.negocio.liquidaciones import regenerar_si_corresponde
 from app.negocio.listas_editables import valores_lista
-from app.negocio.mensajes import mensaje_detalle_reserva_aislada
+from app.negocio.mensajes import mensaje_agradecimiento_transferencia, mensaje_detalle_reserva_aislada
 from app.negocio.validaciones import FORMATO_PERIODO, es_periodo_valido
 from app.negocio.pagos import (
     abrir_tanda_sobres,
@@ -698,6 +698,14 @@ class _PanelRegistrarPago(QWidget):
             obtener_repositorio(self.conn, "Configuracion").actualizar(1, FechaHoraRecogidaSobres=recogida_sobres)
         self.conn.commit()
         self._actualizar_portapapeles_si_es_aislada(id_profesional)
+        if es_transferencia:
+            # Pedido explícito de la clienta: al procesar un pago por
+            # transferencia a cualquier cuenta, dejar listo en el
+            # portapapeles el agradecimiento al profesional — pisa a
+            # propósito lo que haya dejado la línea de arriba (el
+            # "Detalle reserva" de un A), este mensaje nuevo es el que
+            # importa justo después de cobrar una transferencia.
+            QGuiApplication.clipboard().setText(mensaje_agradecimiento_transferencia(self.conn, id_profesional))
         self.actualizar()
         self._resetear_formulario()
         QMessageBox.information(self, "Registrar pago", "Pago registrado con éxito.")

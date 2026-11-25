@@ -2,7 +2,12 @@ import pytest
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.negocio.mensajes import mensaje_detalle_reserva_aislada, mensaje_envio_liquidacion, mensaje_grupal
+from app.negocio.mensajes import (
+    mensaje_agradecimiento_transferencia,
+    mensaje_detalle_reserva_aislada,
+    mensaje_envio_liquidacion,
+    mensaje_grupal,
+)
 from app.negocio.oferta_busqueda import Busqueda, CriteriosGlobales
 from app.negocio.oferta_busqueda_whatsapp import generar_texto_oferta_busqueda
 from app.negocio.plantillas_texto import (
@@ -77,7 +82,7 @@ def test_guardar_dos_veces_actualiza_la_misma_fila(conn):
 
 def test_claves_de_mensajes_editables_son_unicas():
     claves = [m.clave for m in MENSAJES_EDITABLES]
-    assert len(claves) == len(set(claves)) == 13
+    assert len(claves) == len(set(claves)) == 14
 
 
 # --------------------------------------------- mensajes que usan la plantilla personalizada
@@ -103,6 +108,19 @@ def test_mensaje_grupal_bloque_feriados_sigue_armando_el_sistema(conn):
 def test_mensaje_grupal_sin_personalizar_sigue_igual_que_antes(conn):
     texto = mensaje_grupal(conn, "2026-08")
     assert "LIQUIDACIONES DE SEPTIEMBRE - AVISOS VARIOS" in texto
+
+
+def test_mensaje_agradecimiento_transferencia_usa_plantilla_personalizada(conn):
+    guardar_texto_personalizado(conn, "mensaje_agradecimiento_transferencia", "Gracias {apodo}, nos vemos.")
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Test", Apodo="Gomi")
+    texto = mensaje_agradecimiento_transferencia(conn, id_prof)
+    assert texto == "Gracias Gomi, nos vemos."
+
+
+def test_mensaje_agradecimiento_transferencia_sin_personalizar_sigue_igual_que_antes(conn):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Test", Apodo="Gomi")
+    texto = mensaje_agradecimiento_transferencia(conn, id_prof)
+    assert texto == "Muchas gracias Gomi 😊\n\nSeguimos en contacto por cualquier cosa, saludos..!"
 
 
 def test_mensaje_detalle_reserva_aislada_solo_el_encabezado_es_editable(conn):

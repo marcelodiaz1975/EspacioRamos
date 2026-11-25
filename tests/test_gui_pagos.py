@@ -307,6 +307,41 @@ def test_registrar_pago_a_profesional_regular_no_toca_el_portapapeles(qtbot, con
     assert copiado == []
 
 
+def test_registrar_pago_por_transferencia_copia_el_agradecimiento_al_portapapeles(qtbot, conn, monkeypatch):
+    """Pedido explícito de la clienta: al procesar un pago por
+    transferencia (a cualquier cuenta receptora), dejar listo en el
+    portapapeles el agradecimiento al profesional."""
+    id_profesional = _crear_profesional(conn)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, Apodo="Gomi")
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.combo_medio_pago.setCurrentText("Celeste - Transferencia a cta propia")
+    panel.combo_cuenta_receptora.setCurrentText("Celeste - CA Banco Macro")
+    panel.spin_monto.setValue(-500)
+
+    panel._registrar()
+
+    assert copiado[-1] == "Muchas gracias Gomi 😊\n\nSeguimos en contacto por cualquier cosa, saludos..!"
+
+
+def test_registrar_pago_sin_transferencia_no_copia_el_agradecimiento(qtbot, conn, monkeypatch):
+    id_profesional = _crear_profesional(conn)
+    copiado = _monkeypatch_clipboard(monkeypatch)
+    pantalla = PantallaPagos(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_pagos
+    _seleccionar_profesional(panel, id_profesional)
+    panel.combo_medio_pago.setCurrentText("Sobre en buzón")
+    panel.spin_monto.setValue(-500)
+
+    panel._registrar()
+
+    assert copiado == []
+
+
 def test_registrar_pago_formulario_se_resetea_y_vuelve_foco_a_profesional(qtbot, conn):
     id_profesional = _crear_profesional(conn)
     pantalla = PantallaPagos(conn)

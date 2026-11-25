@@ -7,6 +7,7 @@ from app.db.seed import sembrar_valores_por_defecto
 from app.negocio.mensajes import (
     _lista_con_y,
     dias_desde_ultimo_pago,
+    mensaje_agradecimiento_transferencia,
     mensaje_detalle_reserva_aislada,
     mensaje_envio_liquidacion,
     mensaje_grupal,
@@ -235,6 +236,39 @@ def test_mensaje_envio_liquidacion_menciona_el_mes(conn, consultorio):
     texto = mensaje_envio_liquidacion(conn, id_prof, PERIODO)
     assert "AGOSTO 2026" in texto
     assert "MENSAJE AUTOMATICO" in texto
+
+
+def test_mensaje_agradecimiento_transferencia_usa_el_apodo(conn, consultorio):
+    """Pedido explícito de la clienta: al registrar un pago por
+    transferencia, el texto de agradecimiento usa el mismo criterio de
+    nombre que el resto de los mensajes (Apodo -> NombrePila ->
+    Tratamiento + Apellido)."""
+    id_prof = _crear_regular(conn, consultorio, Apodo="Male")
+    texto = mensaje_agradecimiento_transferencia(conn, id_prof)
+    assert "Muchas gracias Male" in texto
+    assert "Seguimos en contacto" in texto
+
+
+def test_mensaje_agradecimiento_transferencia_sin_apodo_usa_nombre_pila(conn, consultorio):
+    id_prof = _crear_regular(conn, consultorio, NombrePila="Marcela")
+    texto = mensaje_agradecimiento_transferencia(conn, id_prof)
+    assert "Muchas gracias Marcela" in texto
+
+
+def test_mensaje_agradecimiento_transferencia_no_distingue_categoria(conn):
+    """A diferencia del resto de los mensajes de este módulo, no está
+    acotado a categoría R — cualquier profesional puede pagar por
+    transferencia."""
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="A", Apellido="Aislada", Apodo="Lauri",
+    )
+    texto = mensaje_agradecimiento_transferencia(conn, id_prof)
+    assert "Muchas gracias Lauri" in texto
+
+
+def test_mensaje_agradecimiento_transferencia_rechaza_profesional_inexistente(conn):
+    with pytest.raises(ValueError):
+        mensaje_agradecimiento_transferencia(conn, 9999)
 
 
 def test_lista_con_y_gramatica():

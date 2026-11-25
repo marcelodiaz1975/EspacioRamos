@@ -1518,3 +1518,207 @@ consultorio`) seguían pasando sin tocarlos — confirman el fallback
 para datos sin esta columna. pyflakes limpio en
 `app/negocio/liquidaciones.py` y el archivo de test. Suite completa
 de `tests/test_liquidaciones.py`: 56 passed.
+
+## Registrar pagos: agradecimiento por transferencia + Mensajes predefinidos: diálogo angosto + F2 reemplaza la calculadora por una planilla flotante
+
+Tres pedidos en un mismo mensaje:
+
+> "Solapa 'Registrar pagos' * Quiero que cuando se procese un pago por
+> transferencia a cualquier cuenta, al terminar me deje cargado un
+> texto en el portapapeles que diga lo siguiente: Muchas gracias
+> {apodo} 😊 Seguimos en contacto por cualquier cosa, saludos..! * Ese
+> texto dejalo dentro de los textos de sistema * El cuadro de diálogo
+> reducilo a lo ancho, que los botones sean en filas de tres para que
+> no exceda el ancho de la pantalla, hoy por hoy se sobresale y tengo
+> que correr la ventana para poder apretar el botón 'Ok' F2
+> Calculadora * Quería saber si en vez de la calculadora al presionar
+> esa tecla me podría cargar una especie de planilla de Excel
+> flotante, para hacer anotaciones, cálculos, etc. * Si se puede, esas
+> anotaciones quiero que se guarde permanentemente, que las pueda
+> borrar cuando yo quiera, no cuando se cierra el sistema y se vuelve
+> a entrar se blanquea todo, quiero que se conserven * Es para
+> anotaciones simples y cálculos simples, temporales, como para tener
+> a mano cada tanto."
+
+El "cuadro de diálogo" resultó ser el de Mensajes predefinidos
+(aclarado por la clienta tras una pregunta: "me confundí al
+escribirte" — no había ningún diálogo de más de dos botones en
+Registrar pagos). Sobre el motor de fórmulas de la planilla, la
+clienta aclaró: "fórmulas tipo excel, funciones básicas de operaciones
+aritméticas... no fórmulas complejas... negrita[,] el color de la
+fuente... algún color de relleno en las celdas... formato de números
+de dos decimales y separador de miles."
+
+### Registrar pagos: agradecimiento al portapapeles + texto de sistema editable
+
+`mensaje_agradecimiento_transferencia(conn, id_profesional)`, nueva en
+`app/negocio/mensajes.py`: usa `nombre_para_mensaje` (misma cadena de
+fallback Apodo→NombrePila→Tratamiento+Apellido de todo el módulo) y la
+plantilla editable `mensaje_agradecimiento_transferencia`
+(`DEFAULT_AGRADECIMIENTO_TRANSFERENCIA`, nueva en
+`plantillas_texto.py`, sumada a `MENSAJES_EDITABLES` — aparece en
+Textos del sistema). Sin restricción de categoría, a diferencia del
+resto de los mensajes de `mensajes.py` (todos acotados a R) — este
+agradecimiento aplica a cualquier profesional que pague por
+transferencia. `_registrar` (`app/gui/pantallas/pagos.py`) copia este
+texto al portapapeles cuando `es_transferencia` (flag ya existente),
+después de la línea que ya copiaba el detalle de una aislada — a
+propósito la pisa, el agradecimiento es lo último que importa tras
+cobrar una transferencia.
+
+### Mensajes predefinidos: grilla de variables a 3 columnas
+
+Investigado antes de tocar nada (no había ningún diálogo de más de
+dos botones en Registrar pagos): el diálogo que se sale de la pantalla
+es el de Nuevo/Editar de Mensajes predefinidos — `multiplicador_
+tamano_dialogo=2.0` sobre un ancho que ya depende de
+`_armar_fila_variables` (`crud_generico.py`), cuya grilla de botones de
+variables estaba en 5 columnas desde una ronda anterior. Con las 13
+variables actuales (nombres largos, ej.
+"{promedio_valor_llave_edificio}") esa grilla terminaba midiendo lo
+suficiente para que el diálogo completo saliera a ~1800px de ancho —
+confirmado armando el diálogo real offscreen y midiendo
+`sizeHint().width()` antes/después. `_COLUMNAS_BOTONES_VARIABLES`
+vuelve a 3 (medido offscreen: 1462px, entra en pantalla) — ningún otro
+catálogo usa `variables=` todavía, así que el cambio no afecta a nada
+más. Test renombrado en `test_mensajes_predefinidos.py`
+(`..._grilla_de_3_columnas`, antes "...de_5...").
+
+### F2: planilla flotante en vez de la calculadora
+
+`PlanillaFlotante` (`app/gui/widgets/planilla_flotante.py`, motor en
+`app/negocio/planilla_flotante.py`) reemplaza por completo a la vieja
+`Calculadora` (eliminada, junto con su test). Grilla tipo Excel (12
+columnas A-L × 40 filas) con barra de fórmula arriba (no se edita
+directo en la celda, todo pasa por ahí, igual que Excel) — fórmulas
+con "=" (ej. "=A1+B2*3": +-*/, paréntesis, referencias a otras celdas,
+sin funciones — "no fórmulas complejas"), detección de referencia
+circular, celdas sin "=" nunca se calculan aunque el texto parezca una
+cuenta (para poder anotar texto/números sueltos libremente). Formato
+por celda: negrita, color de texto, color de relleno (vía
+`QColorDialog`), "Formato número" (dos decimales + separador de miles,
+`formatear_miles`, mismo esquema punto-de-miles/coma-decimal que
+`formatear_moneda` sin el "$"). Delete/Backspace borra el contenido de
+la selección sin tocar el formato. Botón "Vaciar todo" (con
+confirmación) borra contenido Y formato de toda la planilla de una.
+
+Persistencia permanente a pedido explícito ("no quiero que se
+blanquee al cerrar el sistema, quiero que se conserven"): tabla nueva
+`CeldaPlanilla` (`IdCelda` tipo "A1" como PK, `Contenido`, `Negrita`,
+`ColorTexto`, `ColorFondo`, `FormatoNumero`) — una fila por celda con
+algo propio, sin fila = celda vacía sin estilo (mismo criterio sparse
+que `PlantillaTexto`).
+
+#### Dos bugs reales de PySide6/shiboken (6.12.0, este sandbox) investigados a fondo para poder armar esta pantalla
+
+**Primero** (resuelto de raíz): guardar un `QFont`/`QBrush`/`QColor`
+como rol de un `QTableWidgetItem` (`setFont`/`setForeground`/
+`setBackground`) a partir de unos cientos de celdas, y después tocar
+su texto, abortaba el proceso al cerrar la ventana ("Fatal Python
+error: none_dealloc... bug likely caused by a refcount error in a C
+extension"). Se resolvió sacando todo el estilo del modelo/ítem: un
+`QStyledItemDelegate` propio (`_DelegadoCelda`) calcula negrita/color
+de texto/color de relleno al pintar, leyendo un dict Python común
+(`self._celdas`) — nunca persiste un tipo complejo de Qt como rol.
+
+**Segundo** (mitigado, no eliminable desde el código de la app):
+investigando por qué el abort seguía apareciendo igual, con o sin
+delegate, se confirmó con varios scripts offscreen aislados que el
+bug de fondo es muchísimo más general — aparece con `QTableWidgetItem.
+setText`, con `setData`, y hasta con un `QAbstractTableModel` propio
+sin ningún `QTableWidgetItem` de por medio. El disparador real es un
+conteo TOTAL de mutaciones de texto sobre ítems de tabla dentro del
+mismo proceso — un número fijo y chico (entre ~700 y ~1000,
+confirmado con scripts mínimos de una sola celda), no algo que escale
+con la cantidad de celdas ni con crear/destruir ventanas. Por debajo
+de ese umbral nunca pasa nada (confirmado hasta 500 mutaciones
+sin ningún problema); por encima, el proceso aborta — pero SOLO en el
+garbage collection final de Python al cerrar TODO el programa, nunca
+durante el uso real (confirmado repetidas veces: el script de prueba
+siempre termina su trabajo e imprime su resultado antes de que
+aparezca el abort en el shutdown). Es decir: ningún dato se pierde
+nunca (ya quedó guardado en SQLite en cada edición), lo que podría
+fallar es el cierre prolijo del proceso tras una sesión muy larga de
+uso intensivo de esta pantalla puntual.
+
+Mitigado con dos cambios, que entre los dos dejan el conteo real muy
+por debajo del umbral en el uso típico ("anotaciones simples... cada
+tanto", no una grilla que se recalcula entera en cada tecla):
+
+1. `_recalcular_textos()` solo llama a `item.setText(...)` cuando el
+   texto cambió de verdad (antes re-seteaba las 480 celdas completas
+   en CADA edición, la inmensa mayoría siempre vacías) — en el uso
+   real esto reduce el conteo de mutaciones de cientos por edición a
+   prácticamente una sola.
+2. `PlanillaFlotante` nunca se destruye: `VentanaPrincipal` crea una
+   única instancia la primera vez que se aprieta F2 y la reusa el
+   resto de la sesión, alternando `show()`/`hide()` (`closeEvent`
+   ignora el cierre real y solo esconde) — así nunca hace falta
+   reconstruir la grilla de 480 `QTableWidgetItem` de cero, que por sí
+   sola ya es una buena porción del presupuesto antes de llegar al
+   umbral.
+
+El resto de las pantallas del sistema no tropieza con este bug en el
+uso diario porque ninguna mantiene un ítem de tabla vivo mutando su
+texto cientos de veces en la misma sesión — todas rearman sus
+`QTableWidgetItem` de cero en cada refresco (bastantes menos refrescos
+por sesión que ediciones posibles en una planilla de notas). No se
+encontró ninguna forma de eliminar el bug de fondo desde código de la
+aplicación (se probó, sin éxito: `gc.disable()`, llamar
+`QApplication.processEvents()` seguido, reemplazar `setText` por
+`setData`, reemplazar `QTableWidgetItem` por un `QAbstractTableModel`
+propio) — es un defecto del build de PySide6/shiboken instalado en
+este sandbox (`pip show PySide6` → 6.12.0), no de cómo está armada
+esta pantalla. Mismo criterio que el resto de los "Fallos conocidos
+del sandbox/contenedor" de más abajo: no bloquea cerrar la ronda, pero
+vale la pena confirmar en el entorno real de la clienta (Windows) si
+esta versión puntual de PySide6 también lo tiene, antes de que haga
+un uso muy intensivo y prolongado de esta pantalla en particular.
+
+Tests: `tests/test_planilla_flotante.py` (27, motor de fórmulas y
+persistencia: valores/fórmulas/referencias/ciclos/errores, formato de
+miles, guardar/leer/vaciar). `tests/test_gui_widget_planilla_
+flotante.py` (17, la ventana real: escribir y persistir, fórmulas con
+referencias, notas sueltas no se calculan, confirmar con Enter baja
+una fila, negrita/color de texto/color de relleno/formato número
+sobre una celda y sobre una selección múltiple, Delete/Backspace,
+Vaciar todo con y sin confirmar, recarga desde lo ya guardado al
+construir una instancia nueva, cerrar con la cruz solo esconde). Este
+archivo comparte una ÚNICA instancia de `PlanillaFlotante` entre todos
+sus tests (fixture `_instancia_compartida`, reconectada a la base de
+cada test sin reconstruir la ventana) — mismo criterio que la app
+real, y necesario para no disparar el segundo bug de arriba dentro de
+la propia suite (confirmado: construir una instancia nueva por test,
+~13 veces, ya lo disparaba).
+
+`tests/test_main_window.py`: `test_f2_abre_una_sola_calculadora_y_f2_
+de_nuevo_la_cierra` se reemplaza por `test_f2_abre_la_planilla_y_f2_
+de_nuevo_la_oculta` (misma instancia siempre, `show()`/`hide()` en vez
+de crear/destruir) y se actualiza la leyenda de la barra de estado
+("F2 – Planilla" en vez de "F2 – Calculadora"). `app/gui/widgets/
+calculadora.py` y `tests/test_gui_widget_calculadora.py` se eliminan
+(sin otro uso confirmado con `grep -rln "Calculadora\b" app/ tests/`).
+
+pyflakes limpio en los ocho archivos de `app/` tocados (`app/db/
+schema.sql`, `app/gui/crud_generico.py`, `app/gui/main_window.py`,
+`app/gui/pantallas/pagos.py`, `app/gui/pantallas/textos_sistema.py`,
+`app/gui/widgets/planilla_flotante.py` nuevo, `app/negocio/mensajes.py`,
+`app/negocio/plantillas_texto.py`, `app/negocio/planilla_flotante.py`
+nuevo) y los ocho de test tocados/nuevos.
+
+Suite completa (`pytest tests/`, 3290 tests): 13 failed, 3277 passed —
+los 13 son EXACTAMENTE los ya documentados ("Fallos conocidos del
+sandbox/contenedor" más abajo: los 3 de `test_avance_mes.py`, los 3 de
+`test_gui_mensajeria.py` y los 7 de calibración de fuentes), ninguno
+nuevo de esta ronda. Al final de esa corrida, después de imprimirse el
+resumen completo, aparece un crash de memoria del proceso ("malloc():
+unaligned tcache chunk detected") — confirmado con una segunda corrida
+completa EXCLUYENDO los dos archivos de test nuevos de la planilla
+(`--ignore=tests/test_gui_widget_planilla_flotante.py --ignore=tests/
+test_planilla_flotante.py`) que el mismo crash, con los mismos 13
+fallos, aparece IGUAL sin esos archivos — así que no lo causa esta
+ronda: es un artefacto preexistente de correr la suite entera (~3290
+tests, muchas pantallas con `QTableWidget` pesado) en un solo proceso,
+de la misma familia de bug de PySide6/shiboken investigada arriba para
+la planilla, pero a una escala que ya se da sin que esta ronda le
+agregue nada.

@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from app.gui.dialogos import preguntar_si_no
 from app.gui.estilos import hoja_estilos, paleta
 from app.gui.recursos import RUTA_ICONO
-from app.gui.widgets.calculadora import Calculadora
+from app.gui.widgets.planilla_flotante import PlanillaFlotante
 from app.negocio.avance_mes import puede_avanzarse_mes
 from app.negocio.dias import periodo_actual
 from app.negocio.plantillas_texto import resolver_plantilla
@@ -200,13 +200,13 @@ class VentanaPrincipal(QMainWindow):
         # `_reiniciar_solapa_activa` sigue siendo el mismo). El orden es
         # el que pidió la clienta, no alfabético ni por categoría de menú.
         self._etiqueta_funciones = QLabel(
-            "F1 – Ayuda / F2 – Calculadora / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
+            "F1 – Ayuda / F2 – Planilla / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
             "F6 – Grilla / F7 – Mensajería / F8 – Predefinidos / F9 – Oferta / F10 – Profesionales / "
             "F11 – Pagos / F12 – Panel de control"
         )
         self.statusBar().addWidget(self._etiqueta_funciones)
 
-        self._calculadora: Calculadora | None = None
+        self._planilla: PlanillaFlotante | None = None
         self._atajo_calculadora = QShortcut(Qt.Key.Key_F2, self)
         self._atajo_calculadora.activated.connect(self._abrir_calculadora)
 
@@ -288,21 +288,21 @@ class VentanaPrincipal(QMainWindow):
         self._aplicar_colapso(categoria)
 
     def _abrir_calculadora(self) -> None:
-        """F2 alterna la calculadora: la pone en pantalla la primera vez,
-        la saca si se vuelve a apretar mientras ya está abierta (pedido
-        de la clienta) — una sola instancia por ventana, y `_calculadora`
-        queda en `None` otra vez al cerrarse (señal `destroyed`, se
-        dispara tanto por este toggle como por la cruz o Escape) para
-        que la próxima F2 abra una nueva."""
-        if self._calculadora is None:
-            self._calculadora = Calculadora(self)
-            self._calculadora.destroyed.connect(self._al_cerrar_calculadora)
-            self._calculadora.show()
+        """F2 alterna la planilla flotante (pedido de la clienta: "en vez
+        de la calculadora... una especie de planilla de Excel flotante" —
+        reemplaza a la vieja `Calculadora`, ver `PlanillaFlotante`): la
+        pone en pantalla la primera vez, la saca si se vuelve a apretar
+        mientras ya está visible. A diferencia de la vieja calculadora,
+        la instancia NUNCA se destruye (bug de PySide6/shiboken al crear
+        y destruir repetidas veces un `QTableWidget` de muchas celdas,
+        ver el docstring de `PlanillaFlotante`) — se crea una sola vez y
+        de ahí en más solo se oculta/muestra."""
+        if self._planilla is None:
+            self._planilla = PlanillaFlotante(self.conn, self)
+        if self._planilla.isVisible():
+            self._planilla.hide()
         else:
-            self._calculadora.close()
-
-    def _al_cerrar_calculadora(self) -> None:
-        self._calculadora = None
+            self._planilla.show()
 
     def _panel_mas_interno(self) -> QWidget | None:
         """Baja por la cadena de `QTabWidget` anidados hasta el panel de

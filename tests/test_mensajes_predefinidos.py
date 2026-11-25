@@ -327,13 +327,15 @@ def test_dialogo_suma_un_boton_por_variable_que_inserta_en_el_cursor(qtbot, conn
     assert entrada.toPlainText() == "Hola, {apodo}{localidad}"
 
 
-def test_dialogo_nuevo_tiene_13_variables_en_grilla_de_5_columnas(qtbot, conn):
-    """Pedido explícito de la clienta al sumar {nombre_administrador_
-    principal} (grid 2x5 con 10 variables, ronda anterior): la grilla
-    de botones de variables sigue en 5 columnas fijas (`_COLUMNAS_
-    BOTONES_VARIABLES`, `crud_generico.py`) — con las 3 variables de
-    llaves sumadas en esta ronda (13 en total) pasa a 3 filas (2
-    completas de 5 + una de 3), sin que haga falta tocar ningún
+def test_dialogo_nuevo_tiene_13_variables_en_grilla_de_3_columnas(qtbot, conn):
+    """Pedido explícito de la clienta, ronda posterior a la que subió la
+    grilla a 5 columnas: con nombres de variable largos (ej.
+    "{promedio_valor_llave_edificio}"), 5 columnas hacían que el
+    diálogo (multiplicador de ancho ×2) terminara más ancho que la
+    pantalla ("tengo que correr la ventana para poder apretar el
+    botón 'Ok'") — vuelve a 3 columnas (`_COLUMNAS_BOTONES_VARIABLES`,
+    `crud_generico.py`). Con las 13 variables totales pasa a 5 filas
+    (4 completas de 3 + una de 1), sin que haga falta tocar ningún
     número fijo: la grilla ya era genérica para cualquier cantidad."""
     from PySide6.QtWidgets import QGridLayout
 
@@ -345,8 +347,8 @@ def test_dialogo_nuevo_tiene_13_variables_en_grilla_de_5_columnas(qtbot, conn):
     botones_variable = [b for b in dialogo.findChildren(QPushButton) if b.text().startswith("{")]
     assert len(botones_variable) == 13
     grilla = next(g for g in dialogo.findChildren(QGridLayout) if g.count() == 13)
-    assert grilla.rowCount() == 3
-    assert grilla.columnCount() == 5
+    assert grilla.rowCount() == 5
+    assert grilla.columnCount() == 3
 
 
 def test_vista_previa_sustituye_nombre_espacio(qtbot, conn):

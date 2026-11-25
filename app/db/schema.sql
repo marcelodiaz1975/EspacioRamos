@@ -959,3 +959,16 @@ CREATE TABLE IF NOT EXISTS InstanciaControlPago (
     CampoLibre3 TEXT,
     UNIQUE (IdConcepto, Periodo)
 );
+
+-- 3.38 CeldaPlanilla (pedido de la clienta: planilla flotante de anotaciones/cálculos
+-- simples que reemplaza a la calculadora en F2, ver app.negocio.planilla_flotante) —
+-- una fila por celda con contenido o formato propio (sin fila = celda vacía, sin
+-- estilo); IdCelda es la dirección tipo "A1"/"B12", no un id autoincremental ---------
+CREATE TABLE IF NOT EXISTS CeldaPlanilla (
+    IdCelda TEXT PRIMARY KEY,
+    Contenido TEXT NOT NULL DEFAULT '',
+    Negrita INTEGER NOT NULL DEFAULT 0,
+    ColorTexto TEXT,
+    ColorFondo TEXT,
+    FormatoNumero INTEGER NOT NULL DEFAULT 0
+);

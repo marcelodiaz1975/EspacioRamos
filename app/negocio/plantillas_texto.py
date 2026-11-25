@@ -241,6 +241,11 @@ DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_ALTERNATIVAS_OFRECIDAS = (
     "mejor opción."
 )
 
+DEFAULT_AGRADECIMIENTO_TRANSFERENCIA = (
+    "Muchas gracias {apodo} 😊\n\n"
+    "Seguimos en contacto por cualquier cosa, saludos..!"
+)
+
 
 @dataclass
 class PlantillaMensaje:
@@ -308,5 +313,10 @@ MENSAJES_EDITABLES: list[PlantillaMensaje] = [
         "oferta_busqueda_comentario_alternativas_ofrecidas",
         'Oferta de consultorios/Disponibilidad: comentario "Alternativas ofrecidas" (PDF y WhatsApp)',
         DEFAULT_OFERTA_BUSQUEDA_COMENTARIO_ALTERNATIVAS_OFRECIDAS, (),
+    ),
+    PlantillaMensaje(
+        "mensaje_agradecimiento_transferencia",
+        "Agradecimiento al registrar un pago por transferencia (Pagos/Registrar pagos)",
+        DEFAULT_AGRADECIMIENTO_TRANSFERENCIA, ("apodo",),
     ),
 ]

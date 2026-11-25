@@ -1074,12 +1074,17 @@ class _DialogoRegistro(QDialog):
             entrada.setText(str(valor))
         return entrada
 
-    # 5 (antes 3, pedido explícito de la clienta al sumar la décima
-    # variable en Mensajes predefinidos — "pone 2 filas de 5 botones"):
-    # con 10 variables da exactamente 2x5. Solo Mensajes predefinidos
-    # usa `variables=` hoy (ver `Campo.variables`), así que este cambio
-    # no afecta a ningún otro catálogo todavía.
-    _COLUMNAS_BOTONES_VARIABLES = 5
+    # Vuelve a 3 (pedido explícito de la clienta, ronda posterior a la
+    # que la subió a 5): con nombres de variable largos (ej.
+    # "{promedio_valor_llave_edificio}", "{nombre_administrador_
+    # principal}"), 5 columnas hacían que el diálogo (multiplicador de
+    # ancho ×2, ver `PantallaCRUD` de Mensajes predefinidos) terminara
+    # más ancho que la pantalla — "el cuadro de diálogo... hoy por hoy
+    # se sobresale y tengo que correr la ventana para poder apretar el
+    # botón 'Ok'". Solo Mensajes predefinidos usa `variables=` hoy (ver
+    # `Campo.variables`), así que este cambio no afecta a ningún otro
+    # catálogo todavía.
+    _COLUMNAS_BOTONES_VARIABLES = 3
 
     def _armar_fila_variables(self, entrada: QPlainTextEdit, variables: dict[str, str]) -> QWidget:
         """Un botón por variable disponible (hallazgo #24 de la

@@ -5,13 +5,15 @@ cada pantalla — ver `app.negocio.plantillas_texto` para el mecanismo
 (texto de fábrica + override opcional en `PlantillaTexto`, mismo patrón
 de sustitución que ya usa `MensajePredefinido`).
 
-Alcance: los 9 mensajes de `app.negocio.plantillas_texto.
+Alcance: los 10 mensajes de `app.negocio.plantillas_texto.
 MENSAJES_EDITABLES` — los 7 del Centro de mensajería, `mensaje_detalle_
-reserva_aislada` (segunda vuelta) y `oferta_busqueda_whatsapp` (tercera
+reserva_aislada` (segunda vuelta), `oferta_busqueda_whatsapp` (tercera
 vuelta, el texto de WhatsApp de Oferta de consultorios/Disponibilidad,
 sumado tras una auditoría explícita confirmando que no quedaba ningún
 otro texto generado por el sistema con este mismo perfil de "prosa que
-la clienta copia/envía") — más la ayuda F1 de cada `Seccion` del menú
+la clienta copia/envía") y `mensaje_agradecimiento_transferencia`
+(cuarta vuelta, Pagos/Registrar pagos) — más la ayuda F1 de cada
+`Seccion` del menú
 (hallazgo #23 de la auditoría DC-01/DC-10: "la ayuda F1 funciona y es
 contextual, pero no es editable sin tocar código"). Los tres mensajes
 con cuerpo armado por loops (`mensaje_detalle_reserva_aislada`,

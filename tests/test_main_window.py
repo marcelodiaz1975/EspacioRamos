@@ -377,36 +377,39 @@ def test_etiqueta_de_funciones_f1_a_f12(qtbot, conn):
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
     assert ventana._etiqueta_funciones.text() == (
-        "F1 – Ayuda / F2 – Calculadora / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
+        "F1 – Ayuda / F2 – Planilla / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
         "F6 – Grilla / F7 – Mensajería / F8 – Predefinidos / F9 – Oferta / F10 – Profesionales / "
         "F11 – Pagos / F12 – Panel de control"
     )
 
 
-def test_f2_abre_una_sola_calculadora_y_f2_de_nuevo_la_cierra(qtbot, conn):
-    """Pedido de la clienta: F2 alterna la calculadora — la pone en
-    pantalla la primera vez, la saca si se vuelve a apretar mientras ya
-    está abierta (no abre una segunda)."""
+def test_f2_abre_la_planilla_y_f2_de_nuevo_la_oculta(qtbot, conn):
+    """Pedido de la clienta: F2 alterna la planilla flotante (reemplaza a
+    la vieja calculadora) — la muestra la primera vez, la oculta si se
+    vuelve a apretar mientras ya está visible. A diferencia de la vieja
+    calculadora, la instancia NUNCA se destruye (bug de PySide6/shiboken
+    al crear y destruir repetidas veces un `QTableWidget` de muchas
+    celdas, ver `PlanillaFlotante`) — siempre es la MISMA instancia."""
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
-    assert ventana._calculadora is None
+    assert ventana._planilla is None
 
     ventana._abrir_calculadora()
-    primera = ventana._calculadora
+    primera = ventana._planilla
     assert primera is not None
+    assert primera.isVisible()
 
     ventana._abrir_calculadora()
-    qtbot.wait(50)  # WA_DeleteOnClose agenda un deleteLater, no es sincrónico
-    assert ventana._calculadora is None  # F2 de nuevo la cerró
+    assert ventana._planilla is primera  # misma instancia, solo se ocultó
+    assert not primera.isVisible()
 
     ventana._abrir_calculadora()
-    segunda = ventana._calculadora
-    assert segunda is not None
-    assert segunda is not primera  # la próxima F2 abre una nueva
+    assert ventana._planilla is primera  # F2 de nuevo la vuelve a mostrar
+    assert primera.isVisible()
 
-    segunda.close()
-    qtbot.wait(50)
-    assert ventana._calculadora is None  # se liberó al cerrarla con la cruz
+    primera.close()  # la cruz de la ventana solo esconde, no destruye
+    assert ventana._planilla is primera
+    assert not primera.isVisible()
 
 
 def test_panel_mas_interno_baja_por_tabwidgets_anidados(qtbot, conn):

@@ -27,6 +27,7 @@ from app.negocio.feriados import feriados_relevantes_periodo
 from app.negocio.formato import fecha_corta, hora_fmt, mes_texto
 from app.negocio.liquidaciones import CATEGORIAS_CON_LIQUIDACION_MENSUAL
 from app.negocio.plantillas_texto import (  # noqa: F401 (sustituir_variables se reexporta)
+    DEFAULT_AGRADECIMIENTO_TRANSFERENCIA,
     DEFAULT_DETALLE_RESERVA_AISLADA,
     DEFAULT_ENVIO_LIQUIDACION,
     DEFAULT_GRUPAL,
@@ -275,6 +276,22 @@ def mensaje_envio_liquidacion(conn: sqlite3.Connection, id_profesional: int, per
     anio, mes = periodo.split("-")
     plantilla = resolver_plantilla(conn, "mensaje_envio_liquidacion", DEFAULT_ENVIO_LIQUIDACION)
     return sustituir_variables(plantilla, {"mes": f"{mes_texto(int(mes)).upper()} {anio}"})
+
+
+def mensaje_agradecimiento_transferencia(conn: sqlite3.Connection, id_profesional: int) -> str:
+    """Pedido explícito de la clienta: al registrar un pago por
+    transferencia (a cualquier cuenta receptora) en Pagos/"Registrar
+    pagos", dejar este texto listo en el portapapeles para agradecerle
+    al profesional — sin restricción de categoría (a diferencia del
+    resto de los mensajes de este módulo, no está acotado a R).
+    Editable (clave `mensaje_agradecimiento_transferencia`)."""
+    profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    if profesional is None:
+        raise ValueError(f"No existe el profesional #{id_profesional}")
+    plantilla = resolver_plantilla(
+        conn, "mensaje_agradecimiento_transferencia", DEFAULT_AGRADECIMIENTO_TRANSFERENCIA,
+    )
+    return sustituir_variables(plantilla, {"apodo": nombre_para_mensaje(profesional)})
 
 
 def mensaje_recordatorio_deuda_profesional_x(conn: sqlite3.Connection, id_profesional: int) -> str:
