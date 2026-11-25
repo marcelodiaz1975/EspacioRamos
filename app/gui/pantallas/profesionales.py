@@ -23,7 +23,6 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
-    QFormLayout,
     QFrame,
     QLabel,
     QLineEdit,
@@ -45,7 +44,6 @@ from app.gui.widgets.eliminar_tecla import instalar_eliminar_con_tecla
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional
 from app.negocio.archivos_generados import aplicar_cambio_codigo
 from app.negocio.dias import fecha_actual, periodo_actual
-from app.negocio.formato import formatear_moneda
 from app.negocio.documentacion_profesional import (
     CATEGORIAS_DOCUMENTACION_PROFESIONAL,
     agregar_documento,
@@ -405,40 +403,31 @@ def _al_abrir_dialogo(dialogo) -> None:
     _actualizar_cabeza_equipo(resetear=False)
     _actualizar_tratamiento()
 
-    # Pedido explícito de la clienta (caso real Lic. Gabriela Icutza):
-    # "Saldo cuenta anterior"/"Saldo cuenta actual" son dos campos
-    # EDITABLES independientes (correcciones manuales puntuales, ver
-    # más abajo en CLAUDE.md) — no se tocan. Pero lo que la clienta mira
-    # para saber "cuánto me debe en total" es la SUMA de los dos, no el
-    # campo Actual solo (que únicamente refleja lo que se acumuló DESDE
-    # que arrancó el período en curso). Se agrega una tercera fila de
-    # SOLO LECTURA al final del formulario con ese combinado, actualizada
-    # en vivo mientras se edita cualquiera de los dos campos — sin tocar
-    # el mecanismo genérico de `crud_generico.Campo` (es un agregado
-    # puntual de este diálogo, vía `al_abrir_dialogo`, no un tipo de
-    # campo nuevo para todos los catálogos).
+    # Redefinición completa del modelo de saldos (pedido explícito de la
+    # clienta, caso testigo Vanesa Moreno — ver CLAUDE.md): maneja/ve DOS
+    # saldos nada más, no tres. "Saldo cuenta anterior" sigue siendo el
+    # campo crudo de siempre (lo que quedó del período anterior). "Saldo
+    # cuenta actual" pasa a MOSTRAR/EDITAR el COMBINADO (anterior + lo
+    # propio del período en curso) en vez del bucket crudo solo — ya no
+    # hace falta la tercera fila "Saldo total" de solo lectura de una
+    # ronda anterior (se sacó). Al abrir el diálogo, la precarga ya dejó
+    # en el campo el bucket crudo tal cual está en la base (`_crear_
+    # entrada`) — se reemplaza por el combinado antes de mostrarlo;
+    # `_al_guardar_profesional` hace la cuenta inversa (combinado -
+    # anterior) para volver a persistir el bucket real.
     campo_saldo_actual = dialogo._entradas["SaldoCuentaActual"]
     campo_saldo_anterior = dialogo._entradas["SaldoCuentaAnterior"]
-    etiqueta_saldo_total = QLabel()
 
-    def _actualizar_saldo_total() -> None:
-        def _a_numero(texto: str) -> float:
-            texto = texto.strip()
-            try:
-                return float(texto) if texto else 0.0
-            except ValueError:
-                return 0.0
+    def _a_numero(texto: str) -> float:
+        texto = texto.strip()
+        try:
+            return float(texto) if texto else 0.0
+        except ValueError:
+            return 0.0
 
-        total = _a_numero(campo_saldo_actual.text()) + _a_numero(campo_saldo_anterior.text())
-        etiqueta_saldo_total.setText(formatear_moneda(total))
-
-    campo_saldo_actual.textChanged.connect(_actualizar_saldo_total)
-    campo_saldo_anterior.textChanged.connect(_actualizar_saldo_total)
-    _actualizar_saldo_total()
-
-    formulario_layout = dialogo.findChild(QFormLayout)
-    if formulario_layout is not None:
-        formulario_layout.addRow(QLabel("Saldo total"), etiqueta_saldo_total)
+    bucket_inicial = _a_numero(campo_saldo_actual.text())
+    anterior_inicial = _a_numero(campo_saldo_anterior.text())
+    campo_saldo_actual.setText(str(bucket_inicial + anterior_inicial))
 
 
 def _al_guardar_profesional(valores: dict, registro: sqlite3.Row | None, conn: sqlite3.Connection) -> dict | None:
@@ -495,6 +484,32 @@ def _al_guardar_profesional(valores: dict, registro: sqlite3.Row | None, conn: s
                 "Cabeza de equipo) antes de poder cambiar este profesional.",
             )
             return None
+
+    # "Saldo cuenta actual" vino del diálogo como el COMBINADO (anterior +
+    # bucket, ver `_al_abrir_dialogo`) — se vuelve al bucket real antes de
+    # guardar. Si el ajuste manual cambia alguno de los dos campos reales
+    # respecto a lo que el profesional ya tenía, se avisa que puede
+    # afectar su liquidación antes de confirmarlo (pedido explícito de la
+    # clienta) — solo tiene sentido ese aviso al EDITAR uno ya existente,
+    # un alta nueva no tiene ninguna liquidación que pueda verse afectada.
+    if "SaldoCuentaActual" in valores:
+        nuevo_anterior = valores.get("SaldoCuentaAnterior") or 0.0
+        nuevo_bucket = (valores.get("SaldoCuentaActual") or 0.0) - nuevo_anterior
+        if registro is not None:
+            bucket_original = registro["SaldoCuentaActual"] or 0.0
+            anterior_original = registro["SaldoCuentaAnterior"] or 0.0
+            cambio_real = abs(nuevo_bucket - bucket_original) > 1e-6 or abs(nuevo_anterior - anterior_original) > 1e-6
+            if cambio_real:
+                respuesta = QMessageBox.question(
+                    None, "Ajuste de saldo",
+                    "Estás ajustando a mano el saldo de este profesional — esto puede afectar su "
+                    "liquidación. ¿Confirmás el cambio?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if respuesta != QMessageBox.StandardButton.Yes:
+                    return None
+        valores["SaldoCuentaActual"] = nuevo_bucket
 
     return valores
 

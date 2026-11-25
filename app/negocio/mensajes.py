@@ -201,7 +201,13 @@ def mensaje_recordatorio_fin_de_mes(conn: sqlite3.Connection, id_profesional: in
     variables (`{estado_cuenta}`/`{bloque_feriados}`), el sistema sigue
     decidiendo cuándo y qué contienen (pedido explícito de la clienta)."""
     profesional = _profesional_r(conn, id_profesional)
-    saldo = profesional["SaldoCuentaActual"] or 0.0
+    # "Saldo actual" es siempre el combinado (Saldo anterior + lo propio
+    # del período en curso) — pedido explícito de la clienta (ver
+    # CLAUDE.md, caso testigo Vanesa Moreno). `_profesional_r` ya
+    # restringe esta función a categoría R, así que alcanza con sumar
+    # los dos campos reales (sin el caso especial de categoría A que sí
+    # necesita `app.gui.widgets.resumen_saldo.saldo_actual_mostrado`).
+    saldo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
 
     anio, mes = (int(p) for p in periodo.split("-"))
     ultimo_dia = ultimo_dia_mes(anio, mes)

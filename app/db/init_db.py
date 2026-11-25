@@ -17,10 +17,6 @@ def init_database(db_path: Path | str = DB_PATH_DEFAULT) -> sqlite3.Connection:
     conn.executescript(schema_sql)
     conn.commit()
     aplicar_migraciones(conn)
-    # Import diferido (mismo criterio que app.db.seed): evita que la capa
-    # de base de datos dependa de app.negocio al cargar el módulo.
-    from app.negocio.pagos import reconciliar_saldos_cruzados
-    reconciliar_saldos_cruzados(conn)
     # Pedido explícito de la clienta: migra sola, en cada arranque, las
     # carpetas de imágenes de Localidad/Edificio/Unidad/Consultorio que
     # hayan quedado con un formato de nombre anterior — ver el docstring

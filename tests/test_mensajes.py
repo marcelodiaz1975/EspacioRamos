@@ -188,6 +188,16 @@ def test_recordatorio_fin_de_mes_saldo_pendiente_con_fecha_de_sobres(conn, consu
     assert "hasta las 16hs del martes 25/8." in texto
 
 
+def test_recordatorio_fin_de_mes_estado_de_cuenta_combina_anterior_y_actual(conn, consultorio):
+    """Pedido explícito de la clienta (ver CLAUDE.md, caso testigo Vanesa
+    Moreno): "ESTADO DE CUENTA ACTUAL" usa siempre el saldo combinado
+    (Saldo anterior + lo propio del período en curso), no el bucket
+    `SaldoCuentaActual` solo."""
+    id_prof = _crear_regular(conn, consultorio, SaldoCuentaAnterior=-500, SaldoCuentaActual=4586)
+    texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)
+    assert "Pendiente de cancelación $4.086." in texto
+
+
 def test_recordatorio_fin_de_mes_cierre_de_reservas_y_envio_de_liquidaciones(conn, consultorio):
     id_prof = _crear_regular(conn, consultorio, SaldoCuentaActual=0)
     texto = mensaje_recordatorio_fin_de_mes(conn, id_prof, PERIODO)

@@ -623,29 +623,27 @@ def test_tarjeta_estadisticas_principales_muestra_las_lineas_de_las_tres_seccion
         "Horas aisladas por fuera de la liquidación:", "Reservas extraordinarias por fuera de la liquidación:",
         "Otros conceptos por fuera de la liquidación:", "Gastos operativos:", "Balance del negocio:",
         "Monto liquidado más horas aisladas:", "Monto cobrado hasta el momento:",
-        "Monto restante del mes a cobrar:",
+        "Saldo a cobrar del mes en curso:",
     ):
         assert etiqueta in texto
 
 
-def test_tarjeta_estadisticas_principales_tres_subtitulos_en_negrita_y_en_orden(qtbot, conn):
-    """Pedido explícito de la clienta (corrección de la ronda anterior,
-    que los tenía en itálica + subrayado): "sacá la itálica de los
-    subtítulos y los subtotales del cuadro largo, sacá los subrayados
-    también, que tanto los subtítulos estén en negrita y los subtotales
-    con los importes también" — tres subtítulos en NEGRITA a secas
-    ("Liquidaciones mes en curso" / "Resultado del negocio" / "Monto a
-    cobrar en el mes en curso"), en ese orden."""
+def test_tarjeta_estadisticas_principales_tres_titulos_combinados_en_negrita_y_en_orden(qtbot, conn):
+    """Pedido explícito de la clienta, ronda siguiente a la que agregó
+    el subtítulo plano + línea divisoria + subtotal aparte: "elimina la
+    línea divisoria y el título de cada subtotal. El importe quiero que
+    aparezca dentro de cada título" — ya no hay un subtítulo plano
+    separado del subtotal: el título combinado (en negrita, con su
+    importe ya incluido) es el único título de cada sección, en el
+    mismo orden de siempre."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
-    tarjeta = _tarjeta_de(pantalla.panel_avance.etiqueta_total_liquidado)
-    subtitulos = [
-        e for e in tarjeta.findChildren(QLabel)
-        if e.styleSheet() == "font-weight: bold;"
-        and e.text() in ("Liquidaciones mes en curso", "Resultado del negocio", "Monto a cobrar en el mes en curso")
-    ]
-    assert [e.text() for e in subtitulos] == [
-        "Liquidaciones mes en curso", "Resultado del negocio", "Monto a cobrar en el mes en curso",
+    panel = pantalla.panel_avance
+    titulos = (panel.etiqueta_total_liquidado, panel.etiqueta_balance_negocio, panel.etiqueta_monto_restante_a_cobrar)
+    for etiqueta in titulos:
+        assert etiqueta.styleSheet() == "font-weight: bold;"
+    assert [e.text().split(":")[0] for e in titulos] == [
+        "Total liquidado mes en curso", "Balance del negocio", "Saldo a cobrar del mes en curso",
     ]
 
 
@@ -675,9 +673,12 @@ def test_tarjeta_estadisticas_principales_sin_linea_en_blanco_antes_del_primer_s
 def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, conn):
     """Cada sección (envuelta en su propia `seccionEstadisticas`) tiene
     que quedar antes que la siguiente, en el mismo `QVBoxLayout` —
-    "Liquidaciones mes en curso" primero, después "Resultado del
-    negocio", después "Monto a cobrar en el mes en curso"; y DENTRO de
-    cada una, el detalle sigue quedando antes que su total en negrita."""
+    "Total liquidado mes en curso" primero, después "Balance del
+    negocio", después "Saldo a cobrar del mes en curso"; y DENTRO de
+    cada una, pedido explícito de la clienta en esta ronda: el título
+    combinado (con el importe) pasa a quedar ARRIBA del detalle, al
+    revés que antes (antes el detalle iba arriba y el total/subtotal
+    abajo, separados por una línea divisoria que ya no existe)."""
     pantalla = PanelControl(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_avance
@@ -698,7 +699,7 @@ def test_tarjeta_estadisticas_principales_orden_de_las_tres_secciones(qtbot, con
         layout_seccion = seccion.layout()
         orden_seccion = [layout_seccion.itemAt(i).widget() for i in range(layout_seccion.count())]
         indice_seccion = {id(w): i for i, w in enumerate(orden_seccion) if w is not None}
-        assert indice_seccion[id(detalle)] < indice_seccion[id(total)]
+        assert indice_seccion[id(total)] < indice_seccion[id(detalle)]
 
 
 def test_tarjeta_estadisticas_principales_las_tres_cuentas_sin_fondo_propio(qtbot, conn):

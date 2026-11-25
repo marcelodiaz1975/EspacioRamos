@@ -2426,7 +2426,7 @@ def test_solapa_estado_cuenta_cargos_muestra_saldos_y_tabla_igual_a_registro(qtb
     panel.combo_profesional.setCurrentIndex(panel.combo_profesional.findData(id_profesional))
 
     assert panel.etiquetas_resumen[0].text() == (
-        f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>'
+        f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5 - 678.9)}</span>'
     )
     assert panel.etiquetas_resumen[1].text() == (
         f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>'

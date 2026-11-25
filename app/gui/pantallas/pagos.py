@@ -395,24 +395,23 @@ class _PanelRegistrarPago(QWidget):
         form.addWidget(self.boton_deshacer)
 
         form.addWidget(_linea_divisoria())
-        # Pedido explícito de la clienta: "Saldo período anterior" (cómo
-        # cerró el profesional el período anterior, antes sin mostrarse
-        # en esta solapa) arriba de "Saldo período actual" (antes "Saldo
-        # actual" a secas, renombrada para distinguirla de la anterior).
-        # "Saldo total" (debajo de las dos anteriores): pedido explícito
-        # posterior — "Nuevo saldo" solo restaba el pago del período
-        # ACTUAL, así que un pago imputado al período anterior daba un
-        # importe incompleto/mentiroso. "Saldo total" suma las dos
-        # etiquetas de arriba, y "Nuevo saldo" pasa a calcularse sobre
-        # ESE total en vez de sobre el saldo actual a secas (ver
-        # `_actualizar_saldos`).
+        # Rediseño de saldos (pedido explícito de la clienta, ver
+        # CLAUDE.md "Saldo actual"/"Saldo anterior"): la clienta pasa a
+        # manejar/ver DOS saldos nada más, no tres — "Saldo anterior" es
+        # lo que quedó del mes anterior (campo propio, SaldoCuentaAnterior),
+        # "Saldo actual" es el resultado EN VIVO de la cuenta del
+        # profesional (ya combinado: anterior + lo propio del período en
+        # curso, ver `saldo_actual_mostrado`). La vieja etiqueta "Saldo
+        # total" (que sumaba "Saldo período anterior"+"Saldo período
+        # actual") queda eliminada — ese número es ahora directamente lo
+        # que muestra "Saldo actual". "Nuevo saldo" se calcula sobre ESE
+        # "Saldo actual" combinado más el movimiento que se está cargando
+        # (ver `_actualizar_saldos`).
         self.etiqueta_saldo_anterior = QLabel()
         self.etiqueta_saldo_actual = QLabel()
-        self.etiqueta_saldo_total = QLabel()
         self.etiqueta_nuevo_saldo = QLabel()
         form.addWidget(self.etiqueta_saldo_anterior)
         form.addWidget(self.etiqueta_saldo_actual)
-        form.addWidget(self.etiqueta_saldo_total)
         form.addWidget(self.etiqueta_nuevo_saldo)
 
         form.addWidget(_linea_divisoria())
@@ -511,22 +510,23 @@ class _PanelRegistrarPago(QWidget):
     def _actualizar_saldos(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
-            self.etiqueta_saldo_anterior.setText("Saldo período anterior: —")
-            self.etiqueta_saldo_actual.setText("Saldo período actual: —")
-            self.etiqueta_saldo_total.setText("Saldo total: —")
+            self.etiqueta_saldo_anterior.setText("Saldo anterior: —")
+            self.etiqueta_saldo_actual.setText("Saldo actual: —")
             self.etiqueta_nuevo_saldo.setText("Nuevo saldo: —")
             return
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
         saldo_anterior = (profesional["SaldoCuentaAnterior"] or 0.0) if profesional else 0.0
-        # Bug real reportado por la clienta: para categoría A no hay
-        # liquidación mensual propia, así que `SaldoCuentaActual` nunca
-        # se acredita — ver `saldo_actual_mostrado`.
+        # "Saldo actual" ya viene combinado (anterior + lo propio del
+        # período en curso, ver `saldo_actual_mostrado`) — es el "Saldo
+        # previo" que va a quedar guardado en la fila de HistorialPagos
+        # si se registra el movimiento. "Nuevo saldo" se arma sumándole
+        # el monto que se está por cargar, sin ninguna etiqueta "Saldo
+        # total" intermedia (pedido explícito de la clienta: dos saldos
+        # nada más, el de antes y el de después del movimiento).
         saldo_actual = saldo_actual_mostrado(self.conn, profesional) if profesional else 0.0
-        saldo_total = saldo_anterior + saldo_actual
-        nuevo_saldo = saldo_total + self.spin_monto.value()
-        self.etiqueta_saldo_anterior.setText(self._fmt_saldo_label("Saldo período anterior", saldo_anterior))
-        self.etiqueta_saldo_actual.setText(self._fmt_saldo_label("Saldo período actual", saldo_actual))
-        self.etiqueta_saldo_total.setText(self._fmt_saldo_label("Saldo total", saldo_total))
+        nuevo_saldo = saldo_actual + self.spin_monto.value()
+        self.etiqueta_saldo_anterior.setText(self._fmt_saldo_label("Saldo anterior", saldo_anterior))
+        self.etiqueta_saldo_actual.setText(self._fmt_saldo_label("Saldo actual", saldo_actual))
         self.etiqueta_nuevo_saldo.setText(self._fmt_saldo_label("Nuevo saldo", nuevo_saldo))
 
     def _precargar_recogida_sobres(self) -> None:

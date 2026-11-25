@@ -766,6 +766,58 @@ def _precargar_listas_control_pagos(conn: sqlite3.Connection) -> None:
             orden_siguiente += 1
 
 
+def _revertir_correccion_saldos_cruzados(conn: sqlite3.Connection) -> None:
+    """Pedido explícito de la clienta (ver CLAUDE.md): "Saldo actual"
+    pasa a mostrarse siempre combinado (Anterior + lo acumulado del
+    período en curso, ver `app.gui.widgets.resumen_saldo.saldo_actual_
+    mostrado`) en vez de dos campos independientes con un "Saldo total"
+    aparte. El problema que `reconciliar_saldos_cruzados` (ronda
+    anterior) resolvía — un campo en deuda mientras el OTRO tenía un
+    crédito que ya la cubría — deja de existir con ese cambio: ese
+    crédito ya se ve reflejado solo con mostrar "Saldo actual"
+    combinado, sin tocar los campos guardados. Peor: esa fusión
+    retroactiva DESTRUÍA la separación real entre "lo que se arrastra
+    de antes" (Anterior) y "lo que pasó este período" (Actual) — caso
+    real reportado por la clienta (Vanesa Moreno, R4): quedó con
+    Anterior -189 y Actual 0 cuando lo real era Anterior -396 y Actual
+    207 (su "Saldo actual" combinado, -189, siempre estuvo bien — el
+    problema era solo cómo quedaba repartido entre los dos campos).
+
+    Revierte, una sola vez, cada ajuste sintético que `reconciliar_
+    saldos_cruzados` ya haya generado en `HistorialPagos` (`EsAjuste=1`,
+    `Observacion` arranca con "Corrección automática de saldos
+    cruzados"): aplica el delta opuesto al que quedó guardado en
+    `ImpactoSaldoAnterior`/`ImpactoSaldoActual` de esa fila y la borra
+    (era un movimiento sintético, Monto=0, sin plata real detrás — no
+    representa nada una vez revertido). Idempotente por construcción:
+    una vez borrada, no se vuelve a encontrar en el próximo arranque."""
+    existe_tabla = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'HistorialPagos'"
+    ).fetchone()
+    if not existe_tabla:
+        return
+    columnas_existentes = {f["name"] for f in conn.execute("PRAGMA table_info(HistorialPagos)").fetchall()}
+    if "ImpactoSaldoAnterior" not in columnas_existentes or "Observacion" not in columnas_existentes:
+        return
+    ajustes = conn.execute(
+        "SELECT IdPago, IdProfesional, ImpactoSaldoAnterior, ImpactoSaldoActual FROM HistorialPagos "
+        "WHERE EsAjuste = 1 AND Observacion LIKE 'Corrección automática de saldos cruzados%'"
+    ).fetchall()
+    for ajuste in ajustes:
+        profesional = conn.execute(
+            "SELECT SaldoCuentaAnterior, SaldoCuentaActual FROM Profesional WHERE IdProfesional = ?",
+            (ajuste["IdProfesional"],),
+        ).fetchone()
+        if profesional is not None:
+            nuevo_anterior = (profesional["SaldoCuentaAnterior"] or 0.0) - (ajuste["ImpactoSaldoAnterior"] or 0.0)
+            nuevo_actual = (profesional["SaldoCuentaActual"] or 0.0) - (ajuste["ImpactoSaldoActual"] or 0.0)
+            conn.execute(
+                "UPDATE Profesional SET SaldoCuentaAnterior = ?, SaldoCuentaActual = ? WHERE IdProfesional = ?",
+                (nuevo_anterior, nuevo_actual, ajuste["IdProfesional"]),
+            )
+        conn.execute("DELETE FROM HistorialPagos WHERE IdPago = ?", (ajuste["IdPago"],))
+
+
 def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     for tabla, columna, definicion in _COLUMNAS_NUEVAS:
         existe_tabla = conn.execute(
@@ -803,4 +855,5 @@ def aplicar_migraciones(conn: sqlite3.Connection) -> None:
     _inicializar_valor_aislada_al_momento_de_la_reserva(conn)
     _renombrar_medio_pago_y_cuenta_receptora(conn)
     _precargar_listas_control_pagos(conn)
+    _revertir_correccion_saldos_cruzados(conn)
     conn.commit()

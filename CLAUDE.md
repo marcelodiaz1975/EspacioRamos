@@ -400,6 +400,19 @@ qué no se tocan en `docs/historial/general.md` ("Fallos del
 sandbox/contenedor, ajenos a la app"). Si reaparecen, no bloquean
 cerrar una ronda.
 
+Sumado en la ronda de redefinición de saldos: otros 3 tests de
+`test_gui_mensajeria.py` (`test_marcar_enviada_emite_liquidacion_
+genera_pdf_y_baja_a_gris`, `test_tildar_enviada_despues_de_ordenar_
+afecta_al_profesional_correcto`, `test_categoria_x_gris_queda_al_final_
+del_grupo_gris`) dependen del mismo reloj real del sandbox, por otra
+vía: `_debe_recordar_fin_de_mes` (`app.negocio.mensajeria`) pasa un
+profesional de gris a bordó cuando faltan pocos días reales para fin de
+mes (`DiasAntesFinMesRecordatorioGeneral`), así que corriendo la suite
+cerca de fin de mes estos tests (que asumen "gris") ven "bordo" en su
+lugar. Confirmado con `git stash` que reproducen igual sin ningún
+cambio de esta ronda — no es una regresión, mismo criterio que los
+otros 10 ("si reaparecen, no bloquean cerrar una ronda").
+
 ## Historial archivado
 
 El detalle ronda por ronda de cada pantalla/funcionalidad (pedidos de la
@@ -891,3 +904,282 @@ aviso), `test_reserva_aislada_choca_con_otra_aislada_de_e_y_su_cabeza_
 de_equipo_sigue_siendo_aviso` (confirma que la excepción de equipo
 entre profesionales DISTINTOS no se tocó). pyflakes limpio en
 `reservas.py`. Suite completa de `test_reservas.py`: 77 passed.
+
+## Panel de control: fusionar título e importe en "Estadísticas principales", sacar líneas divisorias
+
+Pedido explícito de la clienta, tercera ronda de rediseño de este
+cuadro: "En el cuadro de 'Estadísticas principales mes en curso' en las
+tres secciones elimina la linea divisoria y el título de cada
+subtotal. El importe quiero que aparezca dentro de cada título. Por
+ejemplo, 'Liquidaciones mes en curso: $ 14.341.476,00'. El primer
+título que quede 'Total liquidado mes en curso: $ 0.000.000,00'. El
+segundo título que quede 'Balance del negocio: $ 0.000.000,00'. El
+tercer título que quede 'Saldo a cobrar del mes en curso: $
+0.000.000,00'. Los de abajo de los títulos no cambian, solo se
+suprimen las lineas divisorias y los importes se reubican junto al
+título."
+
+`_armar_tarjeta_estadisticas_principales` (`app/gui/pantallas/
+panel_control.py`): cada una de las tres secciones pasa a armar
+PRIMERO su propia etiqueta en negrita (`self.etiqueta_total_liquidado`/
+`etiqueta_balance_negocio`/`etiqueta_monto_restante_a_cobrar`, ya
+existían) con el texto COMBINADO "Título: $ importe" — sin el
+`_subtitulo_negrita(...)` suelto de antes ni el `_linea_divisoria()`
+que separaba el subtítulo del detalle. Lo de abajo de cada título
+(detalle por localidad/edificio, igual que siempre) no se tocó.
+`actualizar()` arma ese texto combinado en cada refresco; la tercera
+etiqueta cambia de nombre de cara al usuario ("Monto restante del mes
+a cobrar" -> "Saldo a cobrar del mes en curso", pedido explícito de
+este mismo mensaje) sin cambiar el atributo Python
+(`etiqueta_monto_restante_a_cobrar`, para no tocar el resto del código
+que ya lo usaba). `_subtitulo_negrita` (la función que armaba el
+subtítulo suelto) se elimina del archivo — confirmado sin otro uso.
+
+Tests en `tests/test_gui_panel_control.py`:
+`test_tarjeta_estadisticas_principales_muestra_las_lineas_de_las_tres_
+secciones` actualizado al nuevo texto "Saldo a cobrar del mes en
+curso:". `test_tarjeta_estadisticas_principales_tres_subtitulos_en_
+negrita_y_en_orden` renombrado a `...tres_titulos_combinados_en_
+negrita_y_en_orden`, ahora chequea que las tres etiquetas (título+
+importe) tengan `font-weight: bold;` y que el texto antes de ":" sea
+"Total liquidado mes en curso"/"Balance del negocio"/"Saldo a cobrar
+del mes en curso" en ese orden. `test_tarjeta_estadisticas_principales_
+orden_de_las_tres_secciones` se invierte (ahora el título va ANTES del
+detalle, no después). pyflakes limpio en `panel_control.py`. Suite
+conjunta de `test_gui_panel_control.py`/`test_panel_control.py`: 105
+passed.
+
+## Redefinición completa de "Saldo actual"/"Saldo anterior" (caso testigo Vanesa Moreno)
+
+Pedido inicial de la clienta, con una base real adjunta para
+investigar (`espacio_ramos.db`):
+
+> "Tengo a la profesional R4 Vanesa Moreno, en noviembre tenía
+> liquidados $130.811, y abono $131.000, por ende les sobran $189 para
+> descontar en la próxima liquidación. Me meto en la ficha de ella y
+> veo que dice 'Saldo de cuenta actual' $0 y 'Saldo cuenta anterior'
+> -$189. Si bien el saldo total es correcto, -$189, no tendría que ser
+> al reves lo de los saldos..?"
+
+Investigado contra una copia de la base real (forense con SQL directo
+sobre `HistorialPagos`/`Profesional`, IdProfesional=4): el -$189 de
+"Saldo cuenta anterior" NO era el saldo anterior real — era el
+resultado de `reconciliar_saldos_cruzados` (mecanismo de una ronda
+previa, pensado para corregir un bug YA resuelto de la cascada de
+pagos) fusionando, en un arranque anterior, un Anterior real de -$396
+con un Actual real de $207 en un solo campo (`IdPago 87`, ajuste
+sintético: "saldo período anterior -396.00 -> -189.00, saldo período
+actual 207.00 -> 0.00"). El combinado de los dos campos (-$189) siempre
+fue correcto — el problema era que la fusión destruía la separación
+entre "lo que se arrastra de antes" y "lo que pasó este período",
+dejando los dos campos leíbles por separado con un significado que ya
+no correspondía a ninguna realidad.
+
+Primera ronda de preguntas a la clienta (con `AskUserQuestion`,
+alcance/opciones) no fue respondida con una opción — la clienta
+redefinió el modelo completo por su cuenta, en dos mensajes:
+
+> "La verdad esto de manejar o ver tres saldos me confunde mucho, me
+> gustaría ver dos saldos nada mas.
+>
+> Saldo anterior = lo que quedó del mes anterior, se puede modificar
+> desde el período actual si se hace un proceso que afecte al período
+> anterior u horas aisladas
+>
+> Saldo actual = Saldo anterior + importe liquidado mes en curso (con
+> todo lo que se vaya agregando a la imputación de este período
+> actual) - pagos imputados al mes en curso
+>
+> El saldo actual es el resultado en vivo de como está la cuenta del
+> profesional para mi."
+
+Y, sobre el alcance de pantallas afectadas (segunda pregunta): el
+campo "Saldo cuenta actual" de Profesionales edita el COMBINADO ya
+armado (no el bucket crudo por separado), y los mensajes de WhatsApp
+quedan "igual que ahora" (se profundiza más abajo qué significa eso
+mensaje por mensaje). Mientras se estaba implementando llegó un
+mensaje nuevo con seis puntos más, tratados como la especificación más
+actual y autoritativa:
+
+> "1) En solapa 'Registrar pagos' quiero que estas tres columnas se
+> comporten asi: 'Monto': es el valor del pago o del movimiento que
+> está haciendo. 'Saldo previo': es el saldo actual de la cuenta antes
+> de ese pago. 'Nuevo saldo': Es el saldo actual de la cuenta con ese
+> pago o movimiento contemplado.
+>
+> 2) Misma lógica que el punto 1). Reacomodame las columnas de paso,
+> que 'Saldo previo' y 'Nuevo saldo' estén a continuación de 'Monto'
+>
+> 3) Eliminá la etiqueta informativa 'Saldo total', ese monto queda en
+> lo que dice 'Saldo actual'. Dejá los campos hablitados para hacer
+> ajustes manuales si es necesario, si lo quiero hacer que salga una
+> alarta informando que eso puede afectar a la liquidación del
+> profesional, y si le doy ok que cambie lo que tenga que cambiar.
+>
+> 4) En la grilla de mensajeria, por el caso testigo de Vanesa Moreno,
+> Saldo anterior tendría que decir -$396 en lugar de -$189 como dice
+> ahora; el saldo actual está bien, dice -$189
+>
+> 5) Si, tocá lo necesario en los mensajes para que reflejen los dos
+> saldos que pienso manejar, el anterior y el actual.
+>
+> 6) Entiendo que es correcto"
+
+El punto 4 confirma que `reconciliar_saldos_cruzados` quedó mal y hay
+que REVERTIRLA, tanto hacia adelante como para los datos ya afectados:
+Vanesa Moreno es el caso testigo aceptado — después del cambio, Saldo
+anterior tiene que leer -$396 (no -$189) y Saldo actual combinado tiene
+que seguir en -$189 (no cambia, era el único número ya correcto).
+
+### Núcleo: `_aplicar_pago` sin cascada, migración que revierte la reconciliación, `saldo_actual_mostrado` combinado
+
+`Profesional.SaldoCuentaAnterior` sigue siendo exactamente lo que era:
+un campo propio, "lo que quedó del mes anterior", que solo cambia por
+un pago/cargo imputado a un período anterior o por `avance_mes.py` al
+rotar de mes. `Profesional.SaldoCuentaActual` sigue siendo el bucket
+que acredita la liquidación del mes (R) o un pago/cargo imputado al
+mes en curso — pero deja de ser lo que se MUESTRA como "Saldo actual"
+en cualquier pantalla: ese nombre pasa a significar siempre el
+COMBINADO (Anterior + ese bucket), "el resultado en vivo de cómo está
+la cuenta del profesional", en toda pantalla/mensaje del sistema.
+
+- `app/negocio/pagos.py`: `_aplicar_pago_con_cascada` se renombra
+  `_aplicar_pago` y pierde toda la lógica de redistribución — aplica
+  `monto` a UN SOLO campo (el que decide `_campo_saldo` según
+  `periodo_imputado`, sin cambios) y devuelve `(impacto_anterior,
+  impacto_actual)` con uno de los dos siempre en 0.0. Ya no hace falta
+  la cascada: un crédito en el campo imputado que cubre de más ya se ve
+  reflejado en el combinado sin tener que mezclar los dos campos
+  guardados — mezclarlos, al revés, es justo el bug que motivó esta
+  ronda. `registrar_pago`/`modificar_pago` pasan a llamar
+  `_aplicar_pago`; el "Saldo antes/después del pago" (`SaldoAnterior`/
+  `SaldoNuevo` de `HistorialPagos`) sigue siendo el combinado de los
+  dos campos (eso no cambió, ya era así de una ronda anterior) y sigue
+  cambiando en exactamente `monto` sin importar a qué campo se aplicó.
+  La función `reconciliar_saldos_cruzados` se ELIMINA del archivo
+  (ya no hace falta generar ningún ajuste sintético nuevo).
+- `app/db/init_db.py`: se saca el `import`/llamada a
+  `reconciliar_saldos_cruzados` (corría una vez por arranque).
+- `app/db/migraciones.py`: `_revertir_correccion_saldos_cruzados`
+  (nueva, llamada al final de `aplicar_migraciones`) busca en
+  `HistorialPagos` cualquier fila `EsAjuste=1` con `Observacion` que
+  arranque "Corrección automática de saldos cruzados" (la firma exacta
+  que dejaba `reconciliar_saldos_cruzados`), le aplica a `Profesional`
+  el delta OPUESTO al que guardó en `ImpactoSaldoAnterior`/
+  `ImpactoSaldoActual` y borra la fila (era un movimiento sintético,
+  `Monto=0`, sin plata real detrás). Corre en cada arranque — para una
+  base ya revertida, no vuelve a encontrar ninguna fila y no hace nada
+  (idempotente). Verificado contra una copia fresca de la base real
+  adjuntada: antes de revertir, Vanesa Moreno (IdProfesional 4) tenía
+  Anterior=-189/Actual=0 con el ajuste sintético en `HistorialPagos`;
+  después de `init_database` (que aplica la migración), Anterior=-396/
+  Actual=207, el ajuste sintético desaparece, y
+  `saldo_actual_mostrado(conn, fila)` da -189 — EXACTAMENTE el caso
+  testigo que pidió confirmar la clienta.
+- `app/gui/widgets/resumen_saldo.py`: `saldo_actual_mostrado` pasa a
+  devolver `SaldoCuentaAnterior + bucket` para TODAS las categorías
+  (antes devolvía el bucket solo, con el caso especial de A ya
+  resuelto en una ronda anterior). `partes_resumen`/`texto_resumen`
+  (Cargos especiales, y cualquier otra pantalla que los use) ya
+  llamaban a este helper para "Saldo actual" — quedan corregidos
+  de rebote, sin tocarlos.
+
+### Registrar pagos: "Saldo previo"/"Nuevo saldo" ya combinados, sin "Saldo total"
+
+El formulario de carga (`_actualizar_saldos`, `app/gui/pantallas/
+pagos.py`) pasa a mostrar solo DOS saldos (pedido explícito de la
+clienta): "Saldo anterior" (campo crudo) y "Saldo actual" (combinado,
+vía `saldo_actual_mostrado`) — se saca la etiqueta "Saldo total" de una
+ronda anterior (quedaba redundante, ya lo muestra "Saldo actual") y
+"Nuevo saldo" se calcula sumándole el monto cargado directamente a
+"Saldo actual", sin ningún total intermedio. El orden/ancho de columnas
+de la tabla de movimientos ("Saldo previo"/"Nuevo saldo" justo después
+de "Monto") ya estaba resuelto de una ronda anterior (#79/#82) — nada
+que tocar ahí, y esas dos columnas YA guardaban el combinado (ver
+`registrar_pago`), así que ya cumplían el punto 1 del pedido sin
+cambiar nada.
+
+### Estado de cuenta (Liquidación mensual): agrega "Saldo anterior" al lado de "Saldo actual"
+
+`_PanelEstadoCuentaLiquidaciones` (`app/gui/pantallas/liquidacion.py`)
+mostraba solo "Saldo actual" (el bucket crudo, sin "Saldo anterior") —
+se agrega un segundo campo de solo lectura "Saldo anterior" (campo
+crudo) al lado, y "Saldo actual" pasa a leer el combinado vía
+`saldo_actual_mostrado` en vez de `SaldoCuentaActual` directo.
+
+### Profesionales: "Saldo cuenta actual" edita el combinado, alerta antes de un ajuste manual
+
+Pedido explícito de la clienta: el campo "Saldo cuenta actual" del
+diálogo Nuevo/Editar pasa a MOSTRAR/EDITAR el combinado (no el bucket
+crudo) — se saca la fila de solo lectura "Saldo total" de una ronda
+anterior (#75, ya redundante). `_al_abrir_dialogo` (`app/gui/pantallas/
+profesionales.py`) reemplaza, apenas se abre el diálogo, el valor
+precargado del campo (el bucket crudo, cargado por el mecanismo
+genérico de `crud_generico.Campo`) por `bucket + anterior`.
+`_al_guardar_profesional` hace la cuenta inversa antes de guardar
+(`nuevo_bucket = combinado_ingresado - anterior_ingresado`) para volver
+a persistir el bucket real en `SaldoCuentaActual` — "Saldo cuenta
+anterior" nunca cambió de significado, sigue siendo el campo crudo.
+
+Si el bucket resultante o el anterior cambiaron respecto a lo que el
+profesional ya tenía guardado (un ajuste manual real, no solo abrir y
+cerrar el diálogo sin tocar nada), se pregunta con un `QMessageBox.
+question` si confirma el ajuste ("esto puede afectar su liquidación") —
+al rechazar, no se guarda nada (`al_guardar` devuelve `None`, mismo
+mecanismo que ya usan los dos guardarraíles de categoría de esta
+misma función); al confirmar, se guarda el valor nuevo normalmente.
+Solo se pregunta al EDITAR un profesional ya existente (`registro is
+not None`) — un alta nueva no tiene ninguna liquidación que pueda verse
+afectada.
+
+### Centro de mensajería / Mensajes al profesional: mismo combinado en todos lados
+
+`_PanelCentroMensajeria.actualizar()` (`app/gui/pantallas/
+mensajeria.py`) ya calculaba "Saldo actual" a mano con la fórmula
+correcta (`saldo_anterior + bucket` para R, `saldo_actual_aislada` para
+A) — se simplifica para llamar al mismo `saldo_actual_mostrado`
+compartido en vez de duplicar la cuenta (sin cambio de comportamiento,
+solo DRY). `mensaje_recordatorio_fin_de_mes` (`app/negocio/
+mensajes.py`, "ESTADO DE CUENTA ACTUAL") leía `SaldoCuentaActual` solo
+— pasa a sumarle `SaldoCuentaAnterior` (esta función ya está acotada a
+categoría R vía `_profesional_r`, así que no hace falta el caso
+especial de A ni importar nada de `app.gui` desde la capa de negocio).
+`mensaje_situacion_1`/`_3`/`_5` y `mensaje_recordatorio_deuda_
+profesional_x` (que usan `SaldoCuentaAnterior` solo, para recordatorios
+de deuda VIEJA) se confirman sin cambios — son, por diseño, el otro
+saldo que la clienta pidió seguir viendo por separado.
+
+### Tests y verificación
+
+`tests/test_pagos.py`: la sección de cascada se reemplaza por una de
+"un solo campo por pago (sin cascada)" — mismos escenarios reales
+(pago que cubre de más el período imputado, que cae corto, cargo
+positivo con el otro campo en crédito, eliminar/modificar) pero
+confirmando que el OTRO campo nunca se toca. La sección completa de
+`reconciliar_saldos_cruzados` (7 tests) se elimina. `tests/test_
+migraciones.py` (+3): revierte un ajuste sintético ya generado
+(reproduce el caso Vanesa Moreno con sus montos reales), idempotente
+en la segunda vuelta, no toca un ajuste manual cualquiera que no tenga
+la `Observacion` exacta de la reconciliación retirada. `tests/test_gui_
+widget_resumen_saldo.py` (+2): `saldo_actual_mostrado` combina para R
+y para A (con la aislada en vivo). `tests/test_gui_pagos.py`: los tres
+tests de "Saldo período anterior/actual" pasan a "Saldo anterior/
+actual" sin "Saldo total"; el test de Eliminar con impacto repartido
+entre los dos campos se adapta a simular una fila VIEJA (anterior a
+este cambio, con el impacto ya repartido a mano) en vez de reproducirla
+con un pago nuevo (que ya no puede repartirse). `tests/test_gui_
+novedades.py`/`tests/test_gui_liquidacion.py`: ajustados los valores
+esperados de "Saldo actual" al combinado. `tests/test_profesionales.py`
+(+6): el diálogo muestra el combinado sin "Saldo total", un alta nueva
+arranca en $0, `_al_guardar_profesional` vuelve al bucket real sin
+preguntar nada si no hay cambio real, pregunta y cancela si se
+rechaza, pregunta y guarda bien si se confirma, también pregunta si
+solo cambia el anterior. `tests/test_mensajes.py` (+1): el recordatorio
+de fin de mes combina anterior y actual.
+
+Suite completa tras esta ronda: pyflakes limpio en los nueve archivos
+de `app/` tocados (`app/db/init_db.py`, `app/db/migraciones.py`,
+`app/gui/pantallas/liquidacion.py`, `app/gui/pantallas/mensajeria.py`,
+`app/gui/pantallas/pagos.py`, `app/gui/pantallas/profesionales.py`,
+`app/gui/widgets/resumen_saldo.py`, `app/negocio/mensajes.py`,
+`app/negocio/pagos.py`) y los nueve de test tocados.

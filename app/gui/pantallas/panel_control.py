@@ -216,19 +216,6 @@ def _linea_divisoria() -> QFrame:
     return linea
 
 
-def _subtitulo_negrita(texto: str) -> QLabel:
-    """Subtítulo de sección DENTRO de "Estadísticas principales mes en
-    curso" (Nivel 2 suelto, mismo criterio que `subtituloSeccion` pero
-    sin negrita habitualmente — acá la clienta pidió puntualmente
-    negrita a secas: primero itálica+subrayado, después itálica sin
-    subrayar en los totales, y finalmente (esta ronda) sacar toda
-    itálica/subrayado y dejar subtítulos Y subtotales en negrita, sin
-    más diferenciación entre ambos que el propio texto)."""
-    etiqueta = QLabel(texto)
-    etiqueta.setStyleSheet("font-weight: bold;")
-    return etiqueta
-
-
 def _seccion_estadisticas() -> tuple[QWidget, QVBoxLayout]:
     """Cada una de las tres cuentas de "Estadísticas principales mes en
     curso" (Liquidaciones/Resultado del negocio/Monto a cobrar) queda
@@ -630,80 +617,74 @@ class _PanelAvancePeriodo(QWidget):
 
     def _armar_tarjeta_estadisticas_principales(self) -> QFrame:
         """Rediseño completo (ronda siguiente a la del punto 81), pedido
-        explícito de la clienta — ya no es un solo bloque de texto, son
-        tres cuentas en cascada, cada una con su subtítulo (`_subtitulo_
-        negrita`), las líneas que la componen, una línea divisoria y el
-        total — subtítulos Y totales en NEGRITA a secas (pedido
-        explícito, ronda siguiente a la del diseño con itálica+subrayado:
-        "sacá la itálica... sacá los subrayados también, que tanto los
-        subtítulos estén en negrita y los subtotales con los importes
-        también") (ver `app.negocio.panel_control.
-        EstadisticasPrincipales` para las fórmulas, derivadas exactamente
-        de `Liquidacion.monto_generado` para que "Total liquidado mes en
-        curso" cierre siempre con la suma real de las liquidaciones
-        emitidas del período). Ronda siguiente: cada una de las tres
-        cuentas queda envuelta en su propia `_seccion_estadisticas`,
-        separadas entre sí por `_separador_estadisticas` (fondo
-        blanco) — pedido explícito de la clienta para diferenciarlas
-        visualmente (antes las tres quedaban sobre el mismo fondo gris
-        liso, sin ninguna separación). Tercera ronda: se invierte el
-        esquema de color (ahora las cuentas en sí quedan en gris y es
-        el separador INTERMEDIO el que lleva el fondo blanco — ver
-        `_seccion_estadisticas`/`_separador_estadisticas`) y se saca la
-        línea en blanco (`addSpacing(12)`) que había antes del primer
-        subtítulo, que además generaba un scroll vertical de más:
+        explícito de la clienta — tres cuentas en cascada (ver `app.
+        negocio.panel_control.EstadisticasPrincipales` para las
+        fórmulas, derivadas exactamente de `Liquidacion.monto_generado`
+        para que "Total liquidado mes en curso" cierre siempre con la
+        suma real de las liquidaciones emitidas del período). Cada una
+        queda envuelta en su propia `_seccion_estadisticas`, separadas
+        entre sí por `_separador_estadisticas` (fondo blanco) — pedido
+        explícito de la clienta para diferenciarlas visualmente.
 
-        - "Liquidaciones mes en curso": los ocho conceptos que componen
-          una liquidación (más "Otros ajustes", la bolsa de conceptos
-          raros sin línea propia) → "Total liquidado mes en curso".
-        - "Resultado del negocio": lo liquidado más lo que generan los
+        Ronda siguiente, pedido explícito de la clienta: "en las tres
+        secciones elimina la línea divisoria y el título de cada
+        subtotal. El importe quiero que aparezca dentro de cada
+        título" — el subtítulo plano de cada sección ("Liquidaciones
+        mes en curso"/"Resultado del negocio"/"Monto a cobrar en el mes
+        en curso") y la línea divisoria desaparecen; el título del
+        subtotal (en negrita, ya con su importe) pasa a ser el título
+        de la sección entera, ARRIBA de las líneas de detalle (que no
+        cambian de contenido, solo de posición: ya no van después del
+        subtotal, van después de este título combinado). Dos de los
+        tres títulos conservan el texto que ya tenían como subtotal
+        ("Total liquidado mes en curso"/"Balance del negocio"); el
+        tercero se renombra a pedido explícito ("Saldo a cobrar del mes
+        en curso", antes "Monto restante del mes a cobrar"):
+
+        - "Total liquidado mes en curso": los ocho conceptos que
+          componen una liquidación (más "Otros ajustes", la bolsa de
+          conceptos raros sin línea propia).
+        - "Balance del negocio": lo liquidado más lo que generan los
           profesionales A por fuera de cualquier liquidación (aisladas,
           extraordinarias, llaves/cargos), menos los gastos operativos
-          del período → "Balance del negocio".
-        - "Monto a cobrar en el mes en curso": lo mismo de arriba menos
-          lo efectivamente cobrado hasta el momento (acotado por
-          profesional, sin contar excedentes) → "Monto restante del mes
-          a cobrar"."""
+          del período.
+        - "Saldo a cobrar del mes en curso": lo mismo de arriba menos lo
+          efectivamente cobrado hasta el momento (acotado por
+          profesional, sin contar excedentes)."""
         tarjeta, layout = _tarjeta("Estadísticas principales mes en curso")
         contenido = QWidget()
         layout_contenido = QVBoxLayout(contenido)
         layout_contenido.setContentsMargins(0, 0, 0, 0)
 
         seccion_liquidaciones, layout_liquidaciones = _seccion_estadisticas()
-        layout_liquidaciones.addWidget(_subtitulo_negrita("Liquidaciones mes en curso"))
-        self.etiqueta_detalle_liquidaciones = QLabel()
-        self.etiqueta_detalle_liquidaciones.setWordWrap(True)
-        layout_liquidaciones.addWidget(self.etiqueta_detalle_liquidaciones)
-        layout_liquidaciones.addWidget(_linea_divisoria())
         self.etiqueta_total_liquidado = QLabel()
         self.etiqueta_total_liquidado.setStyleSheet("font-weight: bold;")
         layout_liquidaciones.addWidget(self.etiqueta_total_liquidado)
+        self.etiqueta_detalle_liquidaciones = QLabel()
+        self.etiqueta_detalle_liquidaciones.setWordWrap(True)
+        layout_liquidaciones.addWidget(self.etiqueta_detalle_liquidaciones)
         layout_contenido.addWidget(seccion_liquidaciones)
 
         layout_contenido.addWidget(_separador_estadisticas())
 
         seccion_resultado, layout_resultado = _seccion_estadisticas()
-        layout_resultado.addWidget(_subtitulo_negrita("Resultado del negocio"))
-        self.etiqueta_detalle_resultado = QLabel()
-        self.etiqueta_detalle_resultado.setWordWrap(True)
-        layout_resultado.addWidget(self.etiqueta_detalle_resultado)
-        layout_resultado.addWidget(_linea_divisoria())
         self.etiqueta_balance_negocio = QLabel()
         self.etiqueta_balance_negocio.setStyleSheet("font-weight: bold;")
         layout_resultado.addWidget(self.etiqueta_balance_negocio)
+        self.etiqueta_detalle_resultado = QLabel()
+        self.etiqueta_detalle_resultado.setWordWrap(True)
+        layout_resultado.addWidget(self.etiqueta_detalle_resultado)
         layout_contenido.addWidget(seccion_resultado)
 
         layout_contenido.addWidget(_separador_estadisticas())
 
         seccion_cobro, layout_cobro = _seccion_estadisticas()
-        layout_cobro.addWidget(_subtitulo_negrita("Monto a cobrar en el mes en curso"))
-        self.etiqueta_detalle_cobro = QLabel()
-        self.etiqueta_detalle_cobro.setWordWrap(True)
-        layout_cobro.addWidget(self.etiqueta_detalle_cobro)
-        layout_cobro.addWidget(_linea_divisoria())
         self.etiqueta_monto_restante_a_cobrar = QLabel()
         self.etiqueta_monto_restante_a_cobrar.setStyleSheet("font-weight: bold;")
         layout_cobro.addWidget(self.etiqueta_monto_restante_a_cobrar)
+        self.etiqueta_detalle_cobro = QLabel()
+        self.etiqueta_detalle_cobro.setWordWrap(True)
+        layout_cobro.addWidget(self.etiqueta_detalle_cobro)
         layout_contenido.addWidget(seccion_cobro)
 
         layout_contenido.addStretch()
@@ -858,7 +839,7 @@ class _PanelAvancePeriodo(QWidget):
             f"Monto cobrado hasta el momento: {formatear_moneda(-principales.monto_cobrado)}"
         )
         self.etiqueta_monto_restante_a_cobrar.setText(
-            f"Monto restante del mes a cobrar: {formatear_moneda(principales.monto_restante_a_cobrar)}"
+            f"Saldo a cobrar del mes en curso: {formatear_moneda(principales.monto_restante_a_cobrar)}"
         )
 
         ocup = calcular_estadisticas_ocupacion(self.conn)

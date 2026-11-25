@@ -89,58 +89,36 @@ def _campo_saldo(conn: sqlite3.Connection, periodo_imputado: str | None) -> str:
     return "SaldoCuentaAnterior" if es_mes_anterior else "SaldoCuentaActual"
 
 
-def _aplicar_pago_con_cascada(
+def _aplicar_pago(
     conn: sqlite3.Connection, id_profesional: int, monto: float, periodo_imputado: str | None,
 ) -> tuple[float, float]:
-    """Aplica `monto` (con signo) al profesional, imputado según
-    `periodo_imputado`, y devuelve `(impacto_anterior, impacto_actual)`:
-    el delta que terminó afectando a CADA campo de Profesional.
+    """Aplica `monto` (con signo) a UN SOLO campo de Profesional (el que
+    decide `_campo_saldo` según `periodo_imputado`) y devuelve
+    `(impacto_anterior, impacto_actual)` — el otro valor siempre da 0.0.
 
-    Bug real reportado por la clienta: "abonó el saldo del mes anterior,
-    el actual, y un poco más" — un pago (`monto` negativo) tan grande que
-    alcanzaba a cubrir POR COMPLETO tanto el período al que se imputaba
-    como el OTRO período, con margen, quedaba como un crédito
-    desconectado en el campo imputado, mientras el OTRO campo seguía
-    mostrando una deuda que en los hechos ya estaba cubierta — nunca se
-    repartía. Ahora, si el sobrante alcanza para cubrir el OTRO saldo por
-    completo (no alcanza con dejarlo apenas más chico: tiene que llegar a
-    cero), esa deuda se cancela y lo que queda de más pasa a ser el
-    crédito final, en el campo imputado.
-
-    Un sobrante que NO llega a cubrir el otro saldo por completo no
-    reparte nada — sigue exactamente igual que antes del fix, como un
-    crédito en el campo imputado nomás: ese caso es indistinguible de un
-    pago por adelantado normal contra un período que todavía no tiene
-    cargado el saldo real (ej. una reserva aislada recién creada, que
-    todavía no pasó por `emitir_liquidacion`), y el sistema nunca podría
-    saber si el operador quiso en verdad empezar a pagar el otro período
-    o no — confirmado con un caso real de la suite (`test_mensajes.
-    test_detalle_aislada_calcula_saldo_a_abonar`) antes de agregar esta
-    condición. Un cargo (`monto` positivo) nunca cae en cascada: solo
-    afecta el campo al que se imputa, igual que antes."""
+    Antes este helper repartía en cascada un pago que cubría de más el
+    campo imputado y además cancelaba una deuda del OTRO campo (ver
+    `docs/historial/pagos.md`, "saldos cruzados") — eso dejó de hacer
+    falta: "Saldo actual" pasa a MOSTRARSE siempre combinado (`Saldo
+    anterior` + lo acumulado del período en curso, ver `app.gui.widgets.
+    resumen_saldo.saldo_actual_mostrado`), así que un crédito en un
+    campo que cubre una deuda del otro YA se ve reflejado en ese
+    combinado sin necesidad de mezclar los dos campos guardados —
+    mezclarlos, al revés, terminaba destruyendo la separación real
+    entre "lo que se arrastra de antes" y "lo que pasó este período"
+    (caso real reportado por la clienta, ver `app.db.migraciones.
+    _revertir_correccion_saldos_cruzados`)."""
     repo_prof = obtener_repositorio(conn, "Profesional")
     profesional = repo_prof.obtener(id_profesional)
     campo_objetivo = _campo_saldo(conn, periodo_imputado)
-    campo_otro = "SaldoCuentaActual" if campo_objetivo == "SaldoCuentaAnterior" else "SaldoCuentaAnterior"
-    saldo_objetivo_previo = profesional[campo_objetivo] or 0.0
-    saldo_otro_previo = profesional[campo_otro] or 0.0
+    saldo_previo = profesional[campo_objetivo] or 0.0
+    nuevo_saldo = saldo_previo + monto
+    repo_prof.actualizar(id_profesional, **{campo_objetivo: nuevo_saldo})
 
-    nuevo_objetivo_simple = saldo_objetivo_previo + monto
-    sobrante = -nuevo_objetivo_simple
-    if monto < 0 and saldo_otro_previo > 0 and sobrante >= saldo_otro_previo:
-        nuevo_otro = 0.0
-        nuevo_objetivo = nuevo_objetivo_simple + saldo_otro_previo
-    else:
-        nuevo_otro = saldo_otro_previo
-        nuevo_objetivo = nuevo_objetivo_simple
-
-    repo_prof.actualizar(id_profesional, **{campo_objetivo: nuevo_objetivo, campo_otro: nuevo_otro})
-
-    impacto_objetivo = nuevo_objetivo - saldo_objetivo_previo
-    impacto_otro = nuevo_otro - saldo_otro_previo
+    impacto = nuevo_saldo - saldo_previo
     if campo_objetivo == "SaldoCuentaAnterior":
-        return impacto_objetivo, impacto_otro
-    return impacto_otro, impacto_objetivo
+        return impacto, 0.0
+    return 0.0, impacto
 
 
 def registrar_pago(
@@ -155,11 +133,11 @@ def registrar_pago(
     pago recibido, que reduce lo que debe), positivo se suma (un cargo,
     que aumenta lo que debe). Si se imputa a un período anterior al mes
     en curso afecta SaldoCuentaAnterior (DC-09 §8); si no,
-    SaldoCuentaActual. Si el pago alcanza a cubrir por completo ese
-    saldo Y el del otro período, el sobrante cae en cascada reduciendo
-    esa otra deuda (ver `_aplicar_pago_con_cascada`) — ya no queda nunca
-    como un crédito desconectado mientras el otro período sigue
-    mostrando una deuda ya cubierta.
+    SaldoCuentaActual — un pago nunca toca los dos campos a la vez
+    (ver `_aplicar_pago`): "Saldo actual" se MUESTRA siempre combinado
+    (`app.gui.widgets.resumen_saldo.saldo_actual_mostrado`), así que un
+    pago grande que deja un crédito en el campo imputado ya se refleja
+    bien ahí sin necesidad de mezclar los dos campos guardados.
 
     `fecha`, si no se pasa, toma la fecha de hoy (antes era un campo que
     cargaba el operador a mano; con el rediseño del formulario de Pagos
@@ -183,13 +161,10 @@ def registrar_pago(
     # según a qué período se imputaba el pago — daba un número
     # "incompleto" al mirar la fila sola, mismo problema que ya se
     # había corregido una vez para las etiquetas de arriba, ver
-    # `_actualizar_saldos` en la GUI). El combinado siempre cambia en
-    # exactamente `monto` sin importar cómo reparta la cascada entre
-    # los dos campos (`_aplicar_pago_con_cascada` nunca cambia la SUMA,
-    # solo la redistribuye) — no hace falta ningún caso especial.
+    # `_actualizar_saldos` en la GUI).
     saldo_previo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
 
-    impacto_anterior, impacto_actual = _aplicar_pago_con_cascada(conn, id_profesional, monto, periodo_imputado)
+    impacto_anterior, impacto_actual = _aplicar_pago(conn, id_profesional, monto, periodo_imputado)
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     saldo_campo_nuevo = profesional[campo_objetivo] or 0.0
@@ -230,10 +205,11 @@ def modificar_pago(
     """Edita un pago ya cargado in-place (a diferencia de Vacaciones/
     Licencias/Ausencias, acá no se anula y se recrea): revierte el efecto
     que tenía sobre el saldo del profesional (usando los deltas exactos
-    que guardó en `ImpactoSaldoAnterior`/`ImpactoSaldoActual` — puede
-    haber estado repartido entre los dos campos por la cascada de
-    `_aplicar_pago_con_cascada`) y aplica el nuevo, conserva
-    FechaHoraCarga tal cual quedó la primera vez, y marca
+    que guardó en `ImpactoSaldoAnterior`/`ImpactoSaldoActual` — un pago
+    solo toca uno de los dos campos, ver `_aplicar_pago`, pero un pago
+    cargado antes de este cambio puede tener el impacto repartido entre
+    los dos; el revertido funciona igual en los dos casos) y aplica el
+    nuevo, conserva FechaHoraCarga tal cual quedó la primera vez, y marca
     RegistroModificado. Los parámetros en None dejan ese campo como
     estaba — pasar explícitamente el valor actual si se quiere "no
     cambiarlo" pero de todos modos tocar otro campo."""
@@ -260,7 +236,7 @@ def modificar_pago(
     # Combinado de los dos períodos — mismo criterio que `registrar_pago`.
     saldo_previo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
 
-    impacto_anterior, impacto_actual = _aplicar_pago_con_cascada(conn, pago["IdProfesional"], nuevo_monto, nuevo_periodo)
+    impacto_anterior, impacto_actual = _aplicar_pago(conn, pago["IdProfesional"], nuevo_monto, nuevo_periodo)
 
     profesional = repo_prof.obtener(pago["IdProfesional"])
     nuevo_saldo = (profesional["SaldoCuentaAnterior"] or 0.0) + (profesional["SaldoCuentaActual"] or 0.0)
@@ -314,71 +290,6 @@ def deshacer_ultimo_pago(conn: sqlite3.Connection) -> sqlite3.Row:
         raise ValueError("No hay ningún movimiento para deshacer")
     ultimo = max(todos, key=lambda p: p["IdPago"])
     return eliminar_pago(conn, ultimo["IdPago"])
-
-
-def reconciliar_saldos_cruzados(conn: sqlite3.Connection) -> list[int]:
-    """Corrección retroactiva del bug real reportado por la clienta (ver
-    CLAUDE.md): antes de que `registrar_pago` repartiera en cascada un
-    pago que alcanzaba a cubrir POR COMPLETO tanto el período al que se
-    imputaba como el otro período, con margen (ver
-    `_aplicar_pago_con_cascada`), ese sobrante quedaba como un crédito
-    desconectado en un campo mientras el OTRO campo seguía mostrando una
-    deuda que en los hechos ya estaba cubierta.
-
-    La detección usa EXACTAMENTE el mismo umbral que el fix (no cualquier
-    combinación de signos opuestos): un campo en deuda (positivo) y el
-    OTRO en crédito (negativo) cuya magnitud alcanza para cubrir esa
-    deuda por completo. Un crédito que NO llega a cubrir la otra deuda
-    por completo no se toca — es indistinguible de un pago por
-    adelantado normal contra un período que todavía no tiene cargado el
-    saldo real (confirmado con un caso real de la suite, ver
-    `_aplicar_pago_con_cascada`), y tocarlo sería corregir algo que nunca
-    estuvo roto.
-
-    Se llama una vez en cada arranque (`app.db.init_db.init_database`,
-    después de `aplicar_migraciones`): neta un campo contra el otro — la
-    SUMA de los dos no cambia, solo se redistribuye correctamente entre
-    "anterior" y "actual" — y deja su propio movimiento en
-    HistorialPagos (Monto=0, EsAjuste, con el detalle exacto en
-    Observación) para que quede visible en Estado de cuenta y sea
-    reversible como cualquier otro pago (Eliminar) si hiciera falta. Es
-    así de por sí idempotente: una vez corregido un profesional, ya no
-    vuelve a cumplir la condición (y el fix en `registrar_pago` ya no
-    vuelve a generarla), así que no hace nada en los arranques
-    siguientes. Devuelve la lista de IdProfesional corregidos."""
-    repo_prof = obtener_repositorio(conn, "Profesional")
-    repo_pago = obtener_repositorio(conn, "HistorialPagos")
-    corregidos = []
-    for prof in repo_prof.listar():
-        anterior = prof["SaldoCuentaAnterior"] or 0.0
-        actual = prof["SaldoCuentaActual"] or 0.0
-        if anterior > 0 and actual < 0 and -actual >= anterior:
-            nuevo_anterior, nuevo_actual = 0.0, actual + anterior
-        elif actual > 0 and anterior < 0 and -anterior >= actual:
-            nuevo_anterior, nuevo_actual = anterior + actual, 0.0
-        else:
-            continue
-
-        repo_prof.actualizar(
-            prof["IdProfesional"], SaldoCuentaAnterior=nuevo_anterior, SaldoCuentaActual=nuevo_actual,
-        )
-        repo_pago.crear(
-            IdProfesional=prof["IdProfesional"], Fecha=fecha_actual(conn).isoformat(), Monto=0.0,
-            FechaHoraCarga=datetime.now().isoformat(timespec="seconds"), EsAjuste=1,
-            Observacion=(
-                "Corrección automática de saldos cruzados entre período anterior y actual "
-                f"(bug ya corregido): saldo período anterior {anterior:.2f} -> {nuevo_anterior:.2f}, "
-                f"saldo período actual {actual:.2f} -> {nuevo_actual:.2f}."
-            ),
-            # Combinado — mismo criterio que `registrar_pago`/`modificar_
-            # pago`: acá la suma no cambia (es un reparto interno, Monto=0),
-            # así que "antes"/"después" quedan iguales — coherente, no se
-            # movió plata real.
-            SaldoAnterior=anterior + actual, SaldoNuevo=nuevo_anterior + nuevo_actual, RegistroModificado=0,
-            ImpactoSaldoAnterior=nuevo_anterior - anterior, ImpactoSaldoActual=nuevo_actual - actual,
-        )
-        corregidos.append(prof["IdProfesional"])
-    return corregidos
 
 
 # --------------------------------------------------------------- tanda de sobres (DC-08 §5.3)

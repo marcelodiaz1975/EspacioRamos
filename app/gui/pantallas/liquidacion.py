@@ -64,7 +64,7 @@ from app.gui.widgets.foco import instalar_enter_avanza_foco
 from app.gui.widgets.items_tabla import item_numero
 from app.gui.widgets.orden_tabla import clave_orden_codigo
 from app.gui.widgets.procesando import Procesando
-from app.gui.widgets.resumen_saldo import item_monto
+from app.gui.widgets.resumen_saldo import item_monto, saldo_actual_mostrado
 from app.gui.widgets.selector_periodo import SelectorPeriodo
 from app.gui.widgets.selector_profesional import habilitar_busqueda_profesional, repoblar_combo_profesional
 from app.negocio.archivos_generados import carpeta_base, carpeta_liquidaciones_simuladas, carpeta_profesional
@@ -511,6 +511,10 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
         linea_separadora.setFrameShadow(QFrame.Shadow.Sunken)
         layout_filtros.addWidget(linea_separadora)
 
+        self.campo_saldo_anterior = QLineEdit()
+        self.campo_saldo_anterior.setReadOnly(True)
+        layout_filtros.addWidget(self.campo_saldo_anterior)
+
         self.campo_saldo_actual = QLineEdit()
         self.campo_saldo_actual.setReadOnly(True)
         layout_filtros.addWidget(self.campo_saldo_actual)
@@ -552,12 +556,20 @@ class _PanelEstadoCuentaLiquidaciones(QWidget):
     def _actualizar_datos(self) -> None:
         id_profesional = self.combo_profesional.currentData()
         if id_profesional is None:
+            self.campo_saldo_anterior.setStyleSheet("")
+            self.campo_saldo_anterior.setText("Saldo anterior: —")
             self.campo_saldo_actual.setStyleSheet("")
             self.campo_saldo_actual.setText("Saldo actual: —")
             self.tabla.setRowCount(0)
             return
         profesional = obtener_repositorio(self.conn, "Profesional").obtener(id_profesional)
-        saldo_actual = profesional["SaldoCuentaActual"] or 0.0
+        saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
+        self.campo_saldo_anterior.setText(f"Saldo anterior: {formatear_moneda(saldo_anterior)}")
+        self.campo_saldo_anterior.setStyleSheet(f"color: {COLOR_ROJO};" if saldo_anterior < 0 else "")
+        # "Saldo actual" ya viene combinado (anterior + lo propio del
+        # período en curso, ver `saldo_actual_mostrado`) — pedido
+        # explícito de la clienta de manejar/ver dos saldos nada más.
+        saldo_actual = saldo_actual_mostrado(self.conn, profesional)
         self.campo_saldo_actual.setText(f"Saldo actual: {formatear_moneda(saldo_actual)}")
         self.campo_saldo_actual.setStyleSheet(f"color: {COLOR_ROJO};" if saldo_actual < 0 else "")
         registros = sorted(

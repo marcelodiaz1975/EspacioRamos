@@ -73,6 +73,7 @@ from app.negocio.mensajeria import (
     marcar_recordatorio_deuda_x_generado,
     marcar_recordatorio_mensajeria_generado,
 )
+from app.gui.widgets.resumen_saldo import saldo_actual_mostrado
 from app.negocio.mensajes import (
     liquidacion_del_periodo,
     mensaje_detalle_reserva_aislada,
@@ -82,7 +83,6 @@ from app.negocio.mensajes import (
     mensaje_recordatorio_fin_de_mes,
     mensaje_situacion_1,
     mensaje_situacion_5,
-    saldo_actual_aislada,
 )
 from app.pdf.liquidacion_pdf import generar_pdf_liquidacion
 from app.repositorio.registro import obtener_repositorio
@@ -405,19 +405,14 @@ class _PanelCentroMensajeria(QWidget):
             for fila_idx, profesional in enumerate(self._profesionales):
                 color = colores[profesional["IdProfesional"]]
                 saldo_anterior = profesional["SaldoCuentaAnterior"] or 0.0
-                # Pedido explícito de la clienta: para un R, "lo liquidado
-                # en el mes en curso menos los pagos que hizo" — ya es
-                # justo lo que acredita/descuenta SaldoCuentaActual
-                # (`emitir_liquidacion`/`registrar_pago`), sumado al saldo
-                # anterior. Para un A, en cambio, nada acredita nunca ese
-                # campo (no hay liquidación propia de categoría A) — "lo
-                # agendado... menos los pagos" se calcula en vivo con el
-                # mismo criterio exacto que el "SALDO A ABONAR" del
-                # mensaje de detalle (`saldo_actual_aislada`).
-                if profesional["CategoriaProfesional"] == "A":
-                    saldo_actual = saldo_actual_aislada(self.conn, profesional["IdProfesional"], periodo)
-                else:
-                    saldo_actual = saldo_anterior + (profesional["SaldoCuentaActual"] or 0.0)
+                # "Saldo actual" es siempre el combinado (Saldo anterior +
+                # lo propio del período en curso), mismo helper compartido
+                # que ya usan Pagos/Cargos especiales/Liquidación mensual
+                # (`saldo_actual_mostrado`) — ya resuelve el caso de un A
+                # (nada acredita nunca `SaldoCuentaActual` para esa
+                # categoría, se calcula en vivo con el mismo criterio
+                # exacto que el "SALDO A ABONAR" del mensaje de detalle).
+                saldo_actual = saldo_actual_mostrado(self.conn, profesional)
                 self.tabla.setItem(fila_idx, 0, _ItemCodigo(profesional["IdCodigo"] or ""))
                 self.tabla.setItem(fila_idx, 1, QTableWidgetItem(_nombre_con_tratamiento(profesional)))
                 estado = _texto_estado(profesional["CategoriaProfesional"], color)

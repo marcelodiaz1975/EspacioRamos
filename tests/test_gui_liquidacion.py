@@ -509,7 +509,11 @@ def test_solapa_estado_cuenta_tiene_columna_de_fecha_y_hora_de_generacion(qtbot,
     assert "/" in texto
 
 
-def test_solapa_estado_cuenta_muestra_solo_saldo_actual_en_un_cuadro_de_solo_lectura(qtbot, conn):
+def test_solapa_estado_cuenta_muestra_saldo_anterior_y_actual_en_cuadros_de_solo_lectura(qtbot, conn):
+    """Pedido explícito de la clienta (dos saldos nada más, ver CLAUDE.md):
+    "Saldo actual" ya viene combinado (anterior + lo propio del período en
+    curso, ver `saldo_actual_mostrado`) y "Saldo anterior" se agrega al
+    lado, con el mismo campo propio (`SaldoCuentaAnterior`)."""
     id_prof = _crear_profesional(conn, apellido="Lo Veci", id_codigo="R1")
     obtener_repositorio(conn, "Profesional").actualizar(
         id_prof, SaldoCuentaActual=1500, SaldoCuentaAnterior=-300,
@@ -521,8 +525,9 @@ def test_solapa_estado_cuenta_muestra_solo_saldo_actual_en_un_cuadro_de_solo_lec
     panel.combo_profesional.setCurrentIndex(indice)
 
     assert panel.campo_saldo_actual.isReadOnly()
-    assert panel.campo_saldo_actual.text() == f"Saldo actual: {formatear_moneda(1500)}"
-    assert not hasattr(panel, "campo_saldo_anterior")
+    assert panel.campo_saldo_actual.text() == f"Saldo actual: {formatear_moneda(1500 - 300)}"
+    assert panel.campo_saldo_anterior.isReadOnly()
+    assert panel.campo_saldo_anterior.text() == f"Saldo anterior: {formatear_moneda(-300)}"
 
 
 def test_solapa_estado_cuenta_saldo_actual_negativo_se_colorea_en_rojo(qtbot, conn):

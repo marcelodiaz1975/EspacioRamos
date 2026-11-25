@@ -39,19 +39,30 @@ def fmt_dato(prefijo: str, valor: float) -> str:
 
 
 def saldo_actual_mostrado(conn: sqlite3.Connection, profesional: sqlite3.Row) -> float:
-    """"Saldo actual" que corresponde mostrar para un profesional. Bug
-    real reportado por la clienta: para categoría A no hay liquidación
-    mensual propia (ver `app.negocio.liquidaciones.CATEGORIAS_CON_
-    LIQUIDACION_MENSUAL`), así que nada acredita nunca `Profesional.
-    SaldoCuentaActual` — quedaba siempre en $0 aunque el profesional
-    tuviera una reserva aislada ya ocurrida y sin pagar. Para un A se
-    calcula en vivo (`movimiento_periodo_aislada`, mismo criterio EXACTO
-    que usa Centro de mensajería para su columna "Saldo actual"); para
-    el resto, el campo persistido ya es correcto (se acredita al emitir
-    la liquidación, para R, o al registrar un pago/cargo)."""
+    """"Saldo actual" que corresponde mostrar para un profesional: el
+    resultado en vivo de cómo está la cuenta, definición de la clienta
+    (caso testigo: Vanesa Moreno, ver CLAUDE.md) — "Saldo anterior" (lo
+    que quedó del mes anterior) MÁS lo propio del período en curso
+    (liquidación/movimientos ya imputados a este mes), nunca el bucket
+    del período solo. Antes se mostraba solo ese bucket (`Profesional.
+    SaldoCuentaActual`), lo que mezclaba dos conceptos: para un
+    profesional con deuda de meses anteriores que ya pagó lo de este
+    mes, el bucket en $0 no reflejaba que seguía debiendo el saldo
+    anterior.
+
+    Bug real reportado por la clienta, resuelto en una ronda previa:
+    para categoría A no hay liquidación mensual propia (ver
+    `app.negocio.liquidaciones.CATEGORIAS_CON_LIQUIDACION_MENSUAL`), así
+    que nada acredita nunca `Profesional.SaldoCuentaActual` — el bucket
+    propio de este período se calcula en vivo (`movimiento_periodo_
+    aislada`, mismo criterio EXACTO que usa Centro de mensajería); para
+    el resto, el campo persistido ya es el bucket correcto (se acredita
+    al emitir la liquidación, para R, o al registrar un pago/cargo)."""
     if profesional["CategoriaProfesional"] == "A":
-        return movimiento_periodo_aislada(conn, profesional["IdProfesional"], periodo_actual(conn))
-    return profesional["SaldoCuentaActual"] or 0.0
+        bucket = movimiento_periodo_aislada(conn, profesional["IdProfesional"], periodo_actual(conn))
+    else:
+        bucket = profesional["SaldoCuentaActual"] or 0.0
+    return (profesional["SaldoCuentaAnterior"] or 0.0) + bucket
 
 
 def partes_resumen(

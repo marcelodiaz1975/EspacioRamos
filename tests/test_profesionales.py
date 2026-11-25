@@ -432,13 +432,13 @@ def test_editar_profesional_e_existente_abre_con_cabeza_de_equipo_habilitada_y_c
     assert combo.currentData() == id_r
 
 
-def test_dialogo_muestra_saldo_total_combinado_y_se_actualiza_en_vivo(qtbot, conn):
-    """Pedido explícito de la clienta (caso real Lic. Gabriela Icutza):
-    "Saldo cuenta actual" y "Saldo cuenta anterior" siguen siendo dos
-    campos editables independientes (correcciones manuales puntuales),
-    pero el diálogo suma una tercera fila de solo lectura con el
-    combinado de los dos, para que se vea "cuánto debe en total" sin
-    confundirlo con el campo Actual solo."""
+def test_dialogo_saldo_actual_muestra_el_combinado_sin_fila_de_saldo_total(qtbot, conn):
+    """Redefinición completa del modelo de saldos (pedido explícito de la
+    clienta, caso testigo Vanesa Moreno — ver CLAUDE.md): maneja/ve DOS
+    saldos nada más. "Saldo cuenta actual" pasa a MOSTRAR/EDITAR el
+    combinado (anterior + lo propio del período en curso) en vez del
+    bucket crudo solo — ya no hace falta la tercera fila "Saldo total"
+    de solo lectura de una ronda anterior (se sacó)."""
     id_prof = obtener_repositorio(conn, "Profesional").crear(
         CategoriaProfesional="R", Apellido="Icutza", SaldoCuentaActual=207292, SaldoCuentaAnterior=81236,
     )
@@ -447,15 +447,22 @@ def test_dialogo_muestra_saldo_total_combinado_y_se_actualiza_en_vivo(qtbot, con
     qtbot.addWidget(dialogo)
     _al_abrir_dialogo(dialogo)
 
-    formulario_layout = dialogo.findChild(QFormLayout)
-    ultima_fila = formulario_layout.rowCount() - 1
-    etiqueta_titulo = formulario_layout.itemAt(ultima_fila, QFormLayout.ItemRole.LabelRole).widget()
-    etiqueta_total = formulario_layout.itemAt(ultima_fila, QFormLayout.ItemRole.FieldRole).widget()
-    assert etiqueta_titulo.text() == "Saldo total"
-    assert etiqueta_total.text() == "$ 288.528,00"
+    assert float(dialogo._entradas["SaldoCuentaActual"].text()) == pytest.approx(288528)
+    assert float(dialogo._entradas["SaldoCuentaAnterior"].text()) == pytest.approx(81236)
 
-    dialogo._entradas["SaldoCuentaActual"].setText("100000")
-    assert etiqueta_total.text() == "$ 181.236,00"
+    formulario_layout = dialogo.findChild(QFormLayout)
+    etiquetas = []
+    for i in range(formulario_layout.rowCount()):
+        item = formulario_layout.itemAt(i, QFormLayout.ItemRole.LabelRole)
+        if item is not None:
+            etiquetas.append(item.widget().text())
+    assert "Saldo total" not in etiquetas
+
+
+def test_dialogo_saldo_actual_de_un_profesional_nuevo_arranca_en_cero(qtbot, conn):
+    dialogo = _nuevo_dialogo_con_hook(conn, qtbot)
+    assert float(dialogo._entradas["SaldoCuentaActual"].text()) == pytest.approx(0)
+    assert dialogo._entradas["SaldoCuentaAnterior"].text().strip() == ""
 
 
 def test_sugerencia_de_codigo_se_actualiza_al_cambiar_categoria(qtbot, conn):
@@ -559,6 +566,89 @@ def test_al_guardar_permite_guardar_el_mismo_r_sin_cambiar_su_categoria(conn):
     registro = obtener_repositorio(conn, "Profesional").obtener(id_r)
     valores = {"CategoriaProfesional": "R", "Apellido": "Cabeza de equipo"}
     assert _al_guardar_profesional(valores, registro, conn) == valores
+
+
+# ---------------------------------------------- saldo combinado (al_guardar)
+
+def test_al_guardar_nuevo_profesional_vuelve_el_combinado_al_bucket_real(conn):
+    """Alta nueva (`registro=None`): nunca hay ninguna liquidación que
+    pueda verse afectada, así que no se pregunta nada — solo se hace la
+    cuenta inversa (combinado - anterior) antes de guardar."""
+    valores = {"SaldoCuentaActual": 1000.0, "SaldoCuentaAnterior": 200.0}
+    resultado = _al_guardar_profesional(valores, None, conn)
+    assert resultado["SaldoCuentaActual"] == pytest.approx(800)
+    assert resultado["SaldoCuentaAnterior"] == pytest.approx(200)
+
+
+def test_al_guardar_sin_cambiar_el_saldo_no_pregunta_nada(conn, monkeypatch):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Icutza", SaldoCuentaActual=207292, SaldoCuentaAnterior=81236,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: preguntas.append(a) or QMessageBox.StandardButton.No),
+    )
+    # Mismo combinado que ya tenía (288528 = 207292 + 81236) y el mismo
+    # anterior: el bucket real resultante (288528 - 81236 = 207292) es
+    # idéntico al que ya estaba guardado, así que no hay ningún ajuste
+    # manual que avisar.
+    valores = {"SaldoCuentaActual": 288528.0, "SaldoCuentaAnterior": 81236.0}
+    resultado = _al_guardar_profesional(valores, registro, conn)
+    assert preguntas == []
+    assert resultado["SaldoCuentaActual"] == pytest.approx(207292)
+
+
+def test_al_guardar_ajuste_manual_de_saldo_pregunta_y_cancela_si_se_rechaza(conn, monkeypatch):
+    """Pedido explícito de la clienta: un ajuste manual al saldo (el
+    combinado terminó distinto del que ya tenía el profesional) avisa
+    que puede afectar la liquidación antes de guardar — si se rechaza,
+    no se guarda nada."""
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Icutza", SaldoCuentaActual=207292, SaldoCuentaAnterior=81236,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: preguntas.append(a[2]) or QMessageBox.StandardButton.No),
+    )
+    valores = {"SaldoCuentaActual": 100000.0, "SaldoCuentaAnterior": 81236.0}
+    assert _al_guardar_profesional(valores, registro, conn) is None
+    assert len(preguntas) == 1
+    assert "afectar" in preguntas[0].lower()
+
+
+def test_al_guardar_ajuste_manual_de_saldo_confirmado_guarda_el_bucket_correcto(conn, monkeypatch):
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Icutza", SaldoCuentaActual=207292, SaldoCuentaAnterior=81236,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes))
+    # Combinado nuevo 100000, mismo anterior 81236 -> bucket real 18764.
+    valores = {"SaldoCuentaActual": 100000.0, "SaldoCuentaAnterior": 81236.0}
+    resultado = _al_guardar_profesional(valores, registro, conn)
+    assert resultado["SaldoCuentaActual"] == pytest.approx(18764)
+    assert resultado["SaldoCuentaAnterior"] == pytest.approx(81236)
+
+
+def test_al_guardar_ajuste_manual_del_anterior_tambien_pregunta(conn, monkeypatch):
+    """El aviso dispara con un cambio real en CUALQUIERA de los dos
+    campos reales, no solo en el bucket — tocar "Saldo cuenta anterior"
+    sin tocar el combinado también cuenta como ajuste manual."""
+    id_prof = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Icutza", SaldoCuentaActual=207292, SaldoCuentaAnterior=81236,
+    )
+    registro = obtener_repositorio(conn, "Profesional").obtener(id_prof)
+    preguntas = []
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        staticmethod(lambda *a, **k: preguntas.append(a) or QMessageBox.StandardButton.No),
+    )
+    valores = {"SaldoCuentaActual": 288528.0, "SaldoCuentaAnterior": 50000.0}
+    assert _al_guardar_profesional(valores, registro, conn) is None
+    assert len(preguntas) == 1
 
 
 def test_al_guardar_sugiere_un_codigo_x_distinto_para_cada_e_del_equipo(conn, monkeypatch):

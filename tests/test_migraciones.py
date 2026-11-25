@@ -1028,3 +1028,104 @@ def test_aplicar_migraciones_es_idempotente_para_medio_pago_y_cuenta_receptora(t
     assert "Celeste - Transferencia a cta propia" in valores
     assert "Transferencia a cta Celeste" not in valores
     conn.close()
+
+
+# --------------------------------------------------------------- reversión de "saldos cruzados"
+#
+# Pedido explícito de la clienta (ver CLAUDE.md, caso Vanesa Moreno): la
+# corrección retroactiva `reconciliar_saldos_cruzados` de una ronda
+# anterior (que fusionaba Anterior/Actual cuando un campo en deuda tenía
+# en el OTRO un crédito que ya la cubría) quedó mal — destruía la
+# separación real entre "lo que se arrastra de antes" y "lo que pasó
+# este período". `_revertir_correccion_saldos_cruzados` deshace, en cada
+# arranque, cualquier ajuste sintético que esa corrección ya haya
+# generado.
+
+def test_aplicar_migraciones_revierte_un_ajuste_de_saldos_cruzados_ya_generado(tmp_path):
+    conn = init_database(tmp_path / "vieja.db")
+    sembrar_valores_por_defecto(conn)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Moreno", SaldoCuentaAnterior=-396, SaldoCuentaActual=207,
+    )
+    # Simula el ajuste sintético que generaba `reconciliar_saldos_cruzados`
+    # en una ronda anterior: neteó el crédito de Actual (207) contra la
+    # deuda de Anterior (-396 era en rigor un crédito en este caso — se
+    # arma el escenario real, deuda en Anterior y crédito en Actual que
+    # la cubre por completo) y dejó su movimiento con los deltas exactos.
+    obtener_repositorio(conn, "Profesional").actualizar(
+        id_profesional, SaldoCuentaAnterior=0, SaldoCuentaActual=-189,
+    )
+    conn.execute(
+        "INSERT INTO HistorialPagos "
+        "(IdProfesional, Fecha, Monto, FechaHoraCarga, EsAjuste, Observacion, "
+        "SaldoAnterior, SaldoNuevo, RegistroModificado, ImpactoSaldoAnterior, ImpactoSaldoActual) "
+        "VALUES (?, '2026-11-01', 0.0, '2026-11-01T00:00:00', 1, "
+        "'Corrección automática de saldos cruzados entre período anterior y actual (bug ya corregido): "
+        "saldo período anterior -396.00 -> 0.00, saldo período actual 207.00 -> -189.00.', "
+        "-189, -189, 0, 396, -396)",
+        (id_profesional,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(-396)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(207)
+    assert obtener_repositorio(conn, "HistorialPagos").listar(IdProfesional=id_profesional) == []
+    conn.close()
+
+
+def test_aplicar_migraciones_es_idempotente_para_reversion_de_saldos_cruzados(tmp_path):
+    conn = init_database(tmp_path / "vieja.db")
+    sembrar_valores_por_defecto(conn)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Moreno", SaldoCuentaAnterior=0, SaldoCuentaActual=-189,
+    )
+    conn.execute(
+        "INSERT INTO HistorialPagos "
+        "(IdProfesional, Fecha, Monto, FechaHoraCarga, EsAjuste, Observacion, "
+        "SaldoAnterior, SaldoNuevo, RegistroModificado, ImpactoSaldoAnterior, ImpactoSaldoActual) "
+        "VALUES (?, '2026-11-01', 0.0, '2026-11-01T00:00:00', 1, "
+        "'Corrección automática de saldos cruzados entre período anterior y actual (bug ya corregido): x', "
+        "-189, -189, 0, 396, -396)",
+        (id_profesional,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+    aplicar_migraciones(conn)  # segunda vuelta: ya no queda ningún ajuste para revertir, no rompe nada
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(-396)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(207)
+    conn.close()
+
+
+def test_aplicar_migraciones_no_toca_un_ajuste_manual_que_no_es_de_saldos_cruzados(tmp_path):
+    """Solo se revierten los ajustes sintéticos que generaba la
+    reconciliación retirada (identificados por su `Observacion` exacta)
+    — un ajuste manual cualquiera, aunque tenga `EsAjuste=1`, no se
+    toca."""
+    conn = init_database(tmp_path / "vieja.db")
+    sembrar_valores_por_defecto(conn)
+    id_profesional = obtener_repositorio(conn, "Profesional").crear(
+        CategoriaProfesional="R", Apellido="Moreno", SaldoCuentaAnterior=100, SaldoCuentaActual=200,
+    )
+    conn.execute(
+        "INSERT INTO HistorialPagos "
+        "(IdProfesional, Fecha, Monto, FechaHoraCarga, EsAjuste, Observacion, "
+        "SaldoAnterior, SaldoNuevo, RegistroModificado, ImpactoSaldoAnterior, ImpactoSaldoActual) "
+        "VALUES (?, '2026-11-01', 50.0, '2026-11-01T00:00:00', 1, 'Ajuste manual cualquiera', "
+        "300, 350, 0, 0, 50)",
+        (id_profesional,),
+    )
+    conn.commit()
+
+    aplicar_migraciones(conn)
+
+    actualizado = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
+    assert actualizado["SaldoCuentaAnterior"] == pytest.approx(100)
+    assert actualizado["SaldoCuentaActual"] == pytest.approx(200)
+    assert len(obtener_repositorio(conn, "HistorialPagos").listar(IdProfesional=id_profesional)) == 1
+    conn.close()

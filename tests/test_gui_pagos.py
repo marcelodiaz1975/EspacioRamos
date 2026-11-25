@@ -1296,11 +1296,12 @@ def test_fecha_de_carga_usa_dia_de_la_semana_abreviado(qtbot, conn):
     assert dia_completo.lower() not in texto
 
 
-def test_registrar_pago_muestra_etiqueta_de_saldo_periodo_anterior(qtbot, conn):
-    """Pedido explícito de la clienta: en Registrar pagos, debajo de
-    "Deshacer último movimiento", agregar "Saldo período anterior:" (cómo
-    cerró el profesional el período anterior) y renombrar "Saldo actual"
-    a "Saldo período actual:" para distinguirlas."""
+def test_registrar_pago_muestra_etiqueta_de_saldo_anterior(qtbot, conn):
+    """"Saldo anterior" (cómo cerró el profesional el período anterior,
+    campo propio `SaldoCuentaAnterior`) y "Saldo actual" (el resultado en
+    vivo de la cuenta: anterior + lo propio del período en curso, ver
+    `saldo_actual_mostrado`) — pedido explícito de la clienta de manejar
+    dos saldos nada más, sin ninguna etiqueta "Saldo total" aparte."""
     id_profesional = _crear_profesional(conn, saldo=1234.5)
     obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=-678.9)
     pantalla = PantallaPagos(conn)
@@ -1309,25 +1310,23 @@ def test_registrar_pago_muestra_etiqueta_de_saldo_periodo_anterior(qtbot, conn):
     _seleccionar_profesional(panel, id_profesional)
 
     assert panel.etiqueta_saldo_anterior.text() == (
-        f'Saldo período anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>'
+        f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>'
     )
     assert panel.etiqueta_saldo_actual.text() == (
-        f'Saldo período actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>'
+        f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5 - 678.9)}</span>'
     )
 
     panel.combo_profesional.setCurrentIndex(0)
-    assert panel.etiqueta_saldo_anterior.text() == "Saldo período anterior: —"
-    assert panel.etiqueta_saldo_actual.text() == "Saldo período actual: —"
-    assert panel.etiqueta_saldo_total.text() == "Saldo total: —"
+    assert panel.etiqueta_saldo_anterior.text() == "Saldo anterior: —"
+    assert panel.etiqueta_saldo_actual.text() == "Saldo actual: —"
 
 
-def test_saldo_total_suma_anterior_y_actual_y_nuevo_saldo_lo_usa_de_base(qtbot, conn):
+def test_nuevo_saldo_se_calcula_sobre_el_saldo_actual_combinado(qtbot, conn):
     """Pedido explícito de la clienta: "Nuevo saldo" solo restaba el pago
-    del período ACTUAL — si el pago se imputa al período anterior, el
-    importe quedaba incompleto/mentiroso. "Saldo total" (debajo de
-    "Saldo período actual") suma las dos etiquetas de arriba, y "Nuevo
-    saldo" pasa a calcularse en vivo sobre ESE total en vez de sobre el
-    saldo actual a secas."""
+    del período ACTUAL — si el pago se imputaba al período anterior, el
+    importe quedaba incompleto/mentiroso. Ya no hay una etiqueta "Saldo
+    total" aparte (se sacó por pedido explícito): "Nuevo saldo" se
+    calcula en vivo sobre "Saldo actual", que ya viene combinado."""
     id_profesional = _crear_profesional(conn, saldo=1234.5)
     obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=-678.9)
     pantalla = PantallaPagos(conn)
@@ -1335,23 +1334,19 @@ def test_saldo_total_suma_anterior_y_actual_y_nuevo_saldo_lo_usa_de_base(qtbot, 
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
 
-    assert panel.etiqueta_saldo_total.text() == (
-        f'Saldo total: <span style="color:black;">{formatear_moneda(1234.5 - 678.9)}</span>'
-    )
-
     panel.spin_monto.setValue(-2000)  # pago imputado al período anterior, mayor que el saldo actual solo
     assert panel.etiqueta_nuevo_saldo.text() == (
         f'Nuevo saldo: <span style="color:{COLOR_ROJO};">{formatear_moneda(1234.5 - 678.9 - 2000)}</span>'
     )
 
 
-def test_saldo_periodo_actual_de_un_a_se_calcula_de_la_aislada_pendiente(qtbot, conn):
+def test_saldo_actual_de_un_a_se_calcula_de_la_aislada_pendiente(qtbot, conn):
     """Bug real reportado por la clienta: cargó una reserva aislada ya
-    ocurrida (categoría A) y todavía sin pagar, y "Saldo período
-    actual"/"Saldo total" mostraban $0 — `Profesional.SaldoCuentaActual`
-    nunca se acredita para un A (no hay liquidación mensual propia, ver
-    `app.negocio.liquidaciones.CATEGORIAS_CON_LIQUIDACION_MENSUAL`),
-    así que leerlo directo siempre daba cero sin importar la aislada."""
+    ocurrida (categoría A) y todavía sin pagar, y "Saldo actual" mostraba
+    $0 — `Profesional.SaldoCuentaActual` nunca se acredita para un A (no
+    hay liquidación mensual propia, ver `app.negocio.liquidaciones.
+    CATEGORIAS_CON_LIQUIDACION_MENSUAL`), así que leerlo directo siempre
+    daba cero sin importar la aislada."""
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento="PB")
     id_consultorio = obtener_repositorio(conn, "Consultorio").crear(
@@ -1368,10 +1363,7 @@ def test_saldo_periodo_actual_de_un_a_se_calcula_de_la_aislada_pendiente(qtbot, 
     _seleccionar_profesional(panel, id_profesional)
 
     assert panel.etiqueta_saldo_actual.text() == (
-        f'Saldo período actual: <span style="color:black;">{formatear_moneda(35434)}</span>'
-    )
-    assert panel.etiqueta_saldo_total.text() == (
-        f'Saldo total: <span style="color:black;">{formatear_moneda(35434)}</span>'
+        f'Saldo actual: <span style="color:black;">{formatear_moneda(35434)}</span>'
     )
 
 
@@ -1453,19 +1445,27 @@ def test_eliminar_pago_muestra_alerta_final_de_exito(qtbot, conn, monkeypatch):
     assert mensajes == [(panel, "Eliminar pago", "Pago eliminado con éxito.")]
 
 
-def test_eliminar_pago_con_cascada_avisa_que_se_reparte_entre_los_dos_saldos(qtbot, conn, monkeypatch):
-    """Bug real (ver CLAUDE.md): un pago que se pasó del saldo actual y
-    cayó en cascada sobre el anterior (`_aplicar_pago_con_cascada`) se
-    revierte tocando los dos campos — el cartel de confirmación tiene
-    que avisarlo, no decir que vuelve a un solo saldo."""
-    id_profesional = _crear_profesional(conn, saldo=2000)
-    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=1000)
+def test_eliminar_pago_con_impacto_repartido_avisa_que_se_reparte_entre_los_dos_saldos(qtbot, conn, monkeypatch):
+    """La cascada que repartía un pago entre los dos campos se retiró
+    (ver CLAUDE.md) — un pago nuevo ya no puede dejar `ImpactoSaldoAnterior`
+    e `ImpactoSaldoActual` no nulos a la vez (ver `_aplicar_pago`). Pero un
+    pago cargado ANTES de este cambio sí puede tener el impacto repartido
+    así, y el cartel de confirmación de Eliminar tiene que seguir avisando
+    que la reversión toca los dos campos en ese caso."""
+    id_profesional = _crear_profesional(conn, saldo=-500)
+    obtener_repositorio(conn, "Profesional").actualizar(id_profesional, SaldoCuentaAnterior=0)
+    # Simula un pago viejo (anterior a este cambio) cuyo impacto quedó
+    # repartido entre los dos campos por la cascada ya retirada: un pago
+    # de -3500 que restó 1000 del anterior y 2500 del actual.
+    obtener_repositorio(conn, "HistorialPagos").crear(
+        IdProfesional=id_profesional, Fecha="2026-11-01", Monto=-3500,
+        ImpactoSaldoAnterior=-1000, ImpactoSaldoActual=-2500,
+    )
+
     pantalla = PantallaPagos(conn)
     qtbot.addWidget(pantalla)
     panel = pantalla.panel_pagos
     _seleccionar_profesional(panel, id_profesional)
-    panel.spin_monto.setValue(-3500)  # cubre actual (2000) + anterior (1000) + 500 de crédito
-    panel._registrar()
 
     textos_preguntados = []
 
@@ -1589,7 +1589,7 @@ def test_solapa_estado_cuenta_muestra_saldos_y_tabla_igual_a_registrar_pago(qtbo
     _seleccionar_profesional(panel, id_profesional)
 
     assert panel.etiquetas_resumen[0].text() == (
-        f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5)}</span>'
+        f'Saldo actual: <span style="color:black;">{formatear_moneda(1234.5 - 678.9)}</span>'
     )
     assert panel.etiquetas_resumen[1].text() == (
         f'Saldo anterior: <span style="color:{COLOR_ROJO};">{formatear_moneda(-678.9)}</span>'
