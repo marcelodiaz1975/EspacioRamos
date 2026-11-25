@@ -1,4 +1,5 @@
 import pytest
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QColorDialog, QMessageBox, QTableWidgetSelectionRange
 
@@ -166,6 +167,37 @@ def test_vaciar_todo_cancelado_no_borra_nada(planilla, monkeypatch):
     monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No))
     planilla._vaciar_todo()
     assert planilla.tabla.item(0, 0).text() == "10"
+
+
+def test_tipear_en_la_tabla_sin_tocar_la_barra_arranca_edicion_en_la_celda(planilla, qtbot):
+    """Pedido explícito: "que al navegar con el cursor se pueda empezar
+    a escribir directamente en la celda" — tipear con la grilla
+    enfocada (no la barra de fórmula) arranca la edición igual. No se
+    chequea `hasFocus()` (necesitaría la ventana realmente visible y
+    activa, frágil bajo Qt offscreen) — lo que importa es que el texto
+    tipeado llegue a la barra de fórmula y de ahí se confirme igual."""
+    planilla.tabla.setCurrentCell(0, 0)
+    qtbot.keyClick(planilla.tabla, Qt.Key.Key_7)
+    assert planilla.barra_formula.text() == "7"
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_Return)
+    assert planilla.tabla.item(0, 0).text() == "7"
+
+
+def test_tipear_en_la_celda_pisa_el_contenido_anterior(planilla):
+    _escribir(planilla, 0, 0, "10")
+    planilla.tabla.setCurrentCell(0, 0)
+    planilla._empezar_a_escribir("9")
+    assert planilla.barra_formula.text() == "9"
+
+
+def test_tipear_varias_teclas_seguidas_se_siguen_acumulando_en_la_barra(planilla, qtbot):
+    """Solo la PRIMERA tecla la intercepta la grilla — a partir de ahí
+    el foco ya está en la barra de fórmula y el resto lo recibe esta de
+    forma nativa (sin nada especial que hacer en el `eventFilter`)."""
+    planilla.tabla.setCurrentCell(0, 0)
+    qtbot.keyClick(planilla.tabla, Qt.Key.Key_7)
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_8)
+    assert planilla.barra_formula.text() == "78"
 
 
 def test_cambiar_de_celda_carga_la_barra_de_formula_con_lo_guardado(planilla):

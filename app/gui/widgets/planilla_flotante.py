@@ -10,13 +10,21 @@ formato de números de dos decimales y separador de miles."
 Una ventana de verdad (no un diálogo modal, igual que la vieja
 calculadora), con una grilla tipo Excel (columnas A, B, C... filas 1, 2,
 3...) y una barra de fórmula arriba (como en Excel: "{dirección}" +
-cuadro de texto) — las celdas de la grilla NO son editables directamente
-(se sacó `ItemIsEditable`), toda edición pasa por la barra de fórmula,
-así no hace falta un delegate separado para distinguir "lo que se tipeó"
-(la fórmula cruda, ej. "=A1+B2") de "lo que se ve" (el resultado
-calculado) — ver `app.negocio.planilla_flotante` para el motor de
-fórmulas y la persistencia (permanente a pedido explícito, "no quiero que
-se blanquee al cerrar el sistema").
+cuadro de texto) — las celdas de la grilla en sí NO tienen `ItemIsEditable`
+(Qt no abre un editor nativo sobre ellas), toda edición de VERDAD pasa
+por la barra de fórmula, así no hace falta un delegate separado para
+distinguir "lo que se tipeó" (la fórmula cruda, ej. "=A1+B2") de "lo que
+se ve" (el resultado calculado). Pedido explícito de la clienta: "que al
+navegar con el cursor se pueda empezar a escribir directamente en la
+celda" — tipear estando parado en una celda (sin haber clickeado antes
+la barra de fórmula) arranca la edición igual, pisando el contenido
+anterior: el `eventFilter` de la tabla intercepta la primera tecla
+imprimible y la redirige a la barra de fórmula (`_empezar_a_escribir`),
+que a partir de ahí sigue recibiendo el resto nativamente. Ver
+`app.negocio.planilla_flotante` para el motor de fórmulas ("+" además de
+"=" como prefijo de fórmula, pedido explícito) y la persistencia
+(permanente a pedido explícito, "no quiero que se blanquee al cerrar el
+sistema").
 
 El formato por celda (negrita/color de texto/color de relleno) se pinta
 con un `QStyledItemDelegate` propio (`_DelegadoCelda`) en vez de
@@ -196,12 +204,34 @@ class PlanillaFlotante(QWidget):
     def eventFilter(self, objeto, evento):  # noqa: N802 (override de Qt)
         """Delete/Backspace en la grilla (no en la barra de fórmula)
         borra el CONTENIDO de la selección, sin tocar el formato — mismo
-        criterio que cualquier planilla de cálculo."""
+        criterio que cualquier planilla de cálculo. Cualquier otra tecla
+        con texto imprimible arranca una edición nueva directamente en
+        la celda (ver `_empezar_a_escribir`) — pedido explícito: "que al
+        navegar con el cursor se pueda empezar a escribir directamente
+        en la celda", igual que Excel."""
         if objeto is self.tabla and evento.type() == QEvent.Type.KeyPress:
             if evento.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
                 self._borrar_contenido_seleccion()
                 return True
+            texto = evento.text()
+            if texto and texto.isprintable():
+                self._empezar_a_escribir(texto)
+                return True
         return super().eventFilter(objeto, evento)
+
+    def _empezar_a_escribir(self, texto: str) -> None:
+        """Tipear estando parado en una celda (sin haber tocado antes la
+        barra de fórmula) arranca una edición nueva que PISA el
+        contenido anterior de la celda — mismo comportamiento que
+        Excel: la primera tecla se captura acá y se manda a la barra de
+        fórmula, que a partir de ahí ya tiene el foco y sigue recibiendo
+        el resto de lo que se tipee de forma nativa (`textEdited` ya
+        está conectado a `_marcar_pendiente`, sin nada más que hacer acá
+        tecla por tecla)."""
+        self.barra_formula.setText(texto)
+        self._marcar_pendiente(texto)
+        self.barra_formula.setFocus()
+        self.barra_formula.end(False)
 
     # --------------------------------------------------------------------------- estado/dirección
 

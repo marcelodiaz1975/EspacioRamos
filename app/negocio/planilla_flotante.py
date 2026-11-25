@@ -15,11 +15,16 @@ y `vaciar_todo` borra la planilla entera de una (botón aparte en la GUI).
 Fórmulas: "funciones básicas de operaciones aritméticas... no fórmulas
 complejas" (pedido explícito) — una celda que arranca con "=" es una fórmula
 con +-*/, paréntesis y referencias a otras celdas (ej. "=A1+B2*3"), sin
-funciones (no hay SUM/PROMEDIO/etc.). Se resuelve recursivamente contra el
-contenido crudo de TODAS las celdas (`valor_celda`), con detección de
-referencia circular. Una celda sin "=" nunca es fórmula, aunque su texto
-parezca una cuenta — eso es justo lo que permite "anotar" texto/números
-sueltos sin que el sistema intente calcularlos."""
+funciones (no hay SUM/PROMEDIO/etc.). "+" es sinónimo de "=" (pedido
+explícito: "que al poner '+C2+C3' sea lo mismo que '=C2+C3'", mismo
+criterio que Excel/Lotus 1-2-3 con el signo "+") — "-" a propósito NO es
+sinónimo, para no romper un número negativo suelto (ej. "-500") que se
+sigue guardando como nota/número, no como fórmula. Se resuelve
+recursivamente contra el contenido crudo de TODAS las celdas
+(`valor_celda`), con detección de referencia circular. Una celda sin "="
+ni "+" nunca es fórmula, aunque su texto parezca una cuenta — eso es
+justo lo que permite "anotar" texto/números sueltos sin que el sistema
+intente calcularlos."""
 from __future__ import annotations
 
 import re
@@ -27,6 +32,17 @@ import sqlite3
 
 _PATRON_CELDA = re.compile(r"[A-Z]+[0-9]+")
 _CARACTERES_FORMULA_VALIDOS = set("0123456789.+-*/() ")
+_PREFIJOS_FORMULA = ("=", "+")
+
+
+def _es_formula(contenido: str) -> bool:
+    return contenido.startswith(_PREFIJOS_FORMULA)
+
+
+def _expresion_formula(contenido: str) -> str:
+    """El "=" no es un operador válido, así que se descarta antes de
+    evaluar — el "+" sí lo es (suma unaria), se deja tal cual."""
+    return contenido[1:] if contenido.startswith("=") else contenido
 
 
 class ErrorFormula(Exception):
@@ -49,12 +65,12 @@ def valor_celda(
     contenido = (celdas.get(id_celda) or "").strip()
     if not contenido:
         return None
-    if not contenido.startswith("="):
+    if not _es_formula(contenido):
         try:
             return float(contenido.replace(",", "."))
         except ValueError:
             return None
-    return _evaluar_formula(celdas, contenido[1:], _visitando | {id_celda})
+    return _evaluar_formula(celdas, _expresion_formula(contenido), _visitando | {id_celda})
 
 
 def _evaluar_formula(celdas: dict[str, str], formula: str, visitando: frozenset[str]) -> float:
@@ -80,7 +96,7 @@ def texto_resultado_celda(celdas: dict[str, str], id_celda: str) -> str:
     números sueltos, sin fórmula) — el formato de miles/2 decimales lo
     aplica aparte la GUI, solo para celdas marcadas con ese estilo."""
     contenido = celdas.get(id_celda) or ""
-    if not contenido.strip().startswith("="):
+    if not _es_formula(contenido.strip()):
         return contenido
     try:
         resultado = valor_celda(celdas, id_celda)

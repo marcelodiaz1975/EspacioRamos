@@ -91,6 +91,24 @@ def test_valor_celda_ciclo_entre_dos_celdas():
         valor_celda({"A1": "=A2+1", "A2": "=A1+1"}, "A1")
 
 
+# --------------------------------------------------------------- "+" sinónimo de "=" (#131)
+
+def test_valor_celda_mas_al_principio_es_sinonimo_de_formula():
+    """Pedido explícito: "poner '+C2+C3' sea lo mismo que '=C2+C3'"."""
+    celdas = {"C2": "10", "C3": "20", "A1": "+C2+C3"}
+    assert valor_celda(celdas, "A1") == 30.0
+
+
+def test_valor_celda_mas_solo_tambien_es_formula():
+    assert valor_celda({"A1": "+5"}, "A1") == 5.0
+
+
+def test_valor_celda_menos_al_principio_no_es_formula():
+    """"-" a propósito NO es sinónimo — un número negativo suelto
+    (ej. "-500") sigue siendo una nota/número, no una fórmula."""
+    assert valor_celda({"A1": "-500"}, "A1") == -500.0
+
+
 # ------------------------------------------------------------------- texto_resultado_celda
 
 def test_texto_resultado_celda_sin_formula_devuelve_tal_cual():
@@ -111,6 +129,11 @@ def test_texto_resultado_celda_formula_invalida_muestra_error():
 
 def test_texto_resultado_celda_ciclo_muestra_error():
     assert texto_resultado_celda({"A1": "=A1+1"}, "A1") == "#ERROR"
+
+
+def test_texto_resultado_celda_con_mas_calcula_igual_que_con_igual():
+    celdas = {"C2": "10", "C3": "20", "A1": "+C2+C3"}
+    assert texto_resultado_celda(celdas, "A1") == "30"
 
 
 # ------------------------------------------------------------------------- formatear_miles

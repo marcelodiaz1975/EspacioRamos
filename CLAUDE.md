@@ -1753,3 +1753,67 @@ maximizado_ademas_del_reiniciar_propio_del_panel` (confirma que
 conviven el refresco propio del panel Y el reafirmado, no que uno pisa
 al otro). pyflakes limpio en `main_window.py`. Suite de `tests/test_
 main_window.py`: 51 passed.
+
+## F2 - Planilla: escribir directo en la celda al navegar + "+" como sinónimo de "="
+
+Dos pedidos puntuales de la clienta sobre la planilla flotante:
+
+> "F2 - Planilla * Que al navegar con el cursor se pueda empezar a
+> escribir directamente en la celda * Que al poner '+C2+C3' por
+> ejemplo sea lo mismo que '=C2+C3', que haga la suma de las dos
+> celdas."
+
+### "+" como sinónimo de "=" (motor de fórmulas)
+
+`app/negocio/planilla_flotante.py` suma `_es_formula`/`_expresion_
+formula`: una celda es fórmula si arranca con "=" O con "+" (mismo
+criterio que Excel/Lotus 1-2-3 con el signo "+" — "no quiero que sea
+fórmula" nunca se pidió para "-", así que a propósito NO se suma como
+sinónimo: un número negativo suelto, ej. "-500", sigue siendo una
+nota/número como hasta ahora, no una fórmula). Al evaluar, el "=" se
+descarta (no es un operador válido) pero el "+" se deja tal cual (es
+una suma unaria válida, `eval("+5+3")` da 8 sin tocar nada). `valor_
+celda`/`texto_resultado_celda` usan estos dos helpers en vez de
+chequear `startswith("=")` a mano. Tests nuevos en `tests/test_
+planilla_flotante.py`: `test_valor_celda_mas_al_principio_es_sinonimo_
+de_formula`, `test_valor_celda_mas_solo_tambien_es_formula`, `test_
+valor_celda_menos_al_principio_no_es_formula` (confirma que "-" sigue
+sin ser fórmula), `test_texto_resultado_celda_con_mas_calcula_igual_
+que_con_igual`.
+
+### Escribir directo en la celda al navegar (GUI)
+
+Hasta esta ronda, las celdas de la grilla no tenían `ItemIsEditable` y
+TODA edición pasaba por la barra de fórmula — tipear estando parado en
+una celda (sin haber clickeado antes la barra) no hacía nada útil
+(Qt lo tomaba como búsqueda incremental de ítems, el comportamiento
+default de `QAbstractItemView`). `PlanillaFlotante.eventFilter`
+(`app/gui/widgets/planilla_flotante.py`) suma: cualquier tecla con
+texto imprimible (que no sea Delete/Backspace, ya manejadas) dispara
+`_empezar_a_escribir(texto)` — pone ese texto en la barra de fórmula,
+marca el pendiente (`_marcar_pendiente`) y le pasa el foco a la barra,
+con el cursor al final (`QLineEdit.end(False)`). Mismo comportamiento
+que Excel: tipear sobre una celda ya con contenido lo PISA entero, no
+lo agrega. Solo hace falta interceptar la PRIMERA tecla — una vez que
+el foco está en la barra de fórmula, el resto de lo que se tipee lo
+recibe esa misma `QLineEdit` de forma nativa (`textEdited` ya estaba
+conectado a `_marcar_pendiente` desde el armado original de la
+pantalla). Las celdas en sí siguen sin `ItemIsEditable` — Qt nunca
+abre un editor nativo sobre ellas, la edición de verdad sigue siendo
+siempre la barra de fórmula, solo que ahora se puede arrancar sin
+clickearla primero.
+
+Tests nuevos en `tests/test_gui_widget_planilla_flotante.py`: `test_
+tipear_en_la_tabla_sin_tocar_la_barra_arranca_edicion_en_la_celda`
+(tecla real vía `qtbot.keyClick` sobre la tabla, confirma que el texto
+llega a la barra y que Enter lo confirma en la celda — sin chequear
+`hasFocus()`, frágil bajo Qt offscreen sin la ventana realmente activa;
+alcanza con confirmar que el texto efectivamente llegó y se puede
+confirmar), `test_tipear_en_la_celda_pisa_el_contenido_anterior`,
+`test_tipear_varias_teclas_seguidas_se_siguen_acumulando_en_la_barra`
+(confirma que solo la primera tecla necesita interceptarse).
+
+pyflakes limpio en `app/negocio/planilla_flotante.py` y `app/gui/
+widgets/planilla_flotante.py`. Suite conjunta de `tests/test_planilla_
+flotante.py`/`tests/test_gui_widget_planilla_flotante.py`/`tests/test_
+main_window.py`: 100 passed.
