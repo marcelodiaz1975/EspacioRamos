@@ -2173,3 +2173,42 @@ passed, 1 failed — el fallo es el ya documentado de calibración de
 fuentes del sandbox (`test_grilla_reserva_alto_para_que_el_scroll_
 horizontal_no_tape_la_ultima_fila`, ver "Fallos conocidos del sandbox/
 contenedor" más arriba), ajeno a esta ronda.
+
+## Tipos de licencia: un alta nueva no se veía en Licencias sin reiniciar todo el programa
+
+Bug real reportado por la clienta:
+
+> "Cree un nuevo tipo de licencia, y tuve que salir del programa y
+> volver a ingresar para que pueda usar ese concepto para registrar
+> con un profesional."
+
+Investigado antes de tocar nada: `_PanelLicencias.combo_tipo`
+(`app/gui/pantallas/novedades.py`, solapa "Licencias" de "Registro de
+ausencias") armaba el combo "Tipo de licencia" leyendo el catálogo
+`TipoLicencia` UNA sola vez, en `_armar_ui` (al construir la
+pantalla) — a diferencia de `combo_profesional`, que ya tenía su
+propio `_cargar_combo_profesional()` recargado en cada `reiniciar()`
+(volver a entrar a la solapa o F5, ver bug análogo ya resuelto en
+rondas anteriores para Vacaciones/Licencias/Ausencias/Cargos
+especiales). Como `_PanelLicencias` es una instancia única que vive
+toda la sesión (no se reconstruye al cambiar de solapa), un alta nueva
+en el catálogo "Tipos de licencia" (otra pantalla) nunca se reflejaba
+en este combo hasta reiniciar TODO el programa.
+
+`_cargar_combo_tipo()`, nueva, mismo patrón que `_cargar_combo_
+profesional` (`blockSignals` para no disparar `_tipo_cambio` por cada
+ítem agregado al repoblar) — se llama tanto en `_armar_ui` (reemplaza
+el loop inline que armaba el combo una sola vez) como en
+`reiniciar()`, justo antes de `combo_tipo.setCurrentIndex(0)`. Con
+esto, un Tipo de licencia nuevo ya aparece con solo volver a entrar a
+la solapa "Licencias" (o F5) — no hace falta reiniciar el programa.
+
+Test nuevo en `tests/test_gui_novedades.py`:
+`test_licencias_combo_tipo_se_actualiza_al_volver_a_la_solapa` (crea
+un Tipo de licencia nuevo con el panel ya construido, dispara
+`showEvent` y confirma que aparece en el combo) — mismo criterio que
+`test_licencias_combo_profesional_se_actualiza_al_volver_a_la_solapa`,
+ya existente para el caso análogo de profesionales. pyflakes limpio en
+`app/gui/pantallas/novedades.py` y el archivo de test. Suite conjunta
+de `tests/test_gui_novedades.py`/`tests/test_licencias.py`: 158
+passed.

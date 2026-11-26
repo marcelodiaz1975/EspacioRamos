@@ -857,6 +857,7 @@ class _PanelLicencias(QWidget):
         self._orden.reiniciar()
         self._cargar_combo_profesional()
         self.combo_profesional.setCurrentIndex(0)
+        self._cargar_combo_tipo()
         self.combo_tipo.setCurrentIndex(0)
         self._precargar_porcentaje()
         hoy = fecha_actual(self.conn)
@@ -874,6 +875,23 @@ class _PanelLicencias(QWidget):
         for id_, etiqueta in _opciones_profesional(self.conn, _CATEGORIAS_TODAS):
             self.combo_profesional.addItem(etiqueta, id_)
         self.combo_profesional.blockSignals(False)
+
+    def _cargar_combo_tipo(self) -> None:
+        """Bug real reportado por la clienta: "Creé un nuevo tipo de
+        licencia, y tuve que salir del programa y volver a ingresar
+        para poder usar ese concepto para registrar con un
+        profesional". El combo se armaba una sola vez, al construir la
+        pantalla (`_armar_ui`) — un alta nueva en el catálogo "Tipos de
+        licencia" (otra solapa) nunca se reflejaba acá, ni volviendo a
+        entrar a esta solapa ni con F5, porque nada volvía a leer la
+        tabla. Se recarga en cada `reiniciar()` (ídem `_cargar_combo_
+        profesional`, mismo mecanismo con `blockSignals` para no
+        disparar `_tipo_cambio` en cada ítem agregado)."""
+        self.combo_tipo.blockSignals(True)
+        self.combo_tipo.clear()
+        for t in obtener_repositorio(self.conn, "TipoLicencia").listar(Activo=1):
+            self.combo_tipo.addItem(t["Nombre"], t["IdTipoLicencia"])
+        self.combo_tipo.blockSignals(False)
 
     def _armar_ui(self) -> None:
         layout_externo = QVBoxLayout(self)
@@ -908,8 +926,7 @@ class _PanelLicencias(QWidget):
 
         self.combo_tipo = QComboBox()
         self.combo_tipo.setFixedWidth(_ANCHO_CAMPO)
-        for t in obtener_repositorio(self.conn, "TipoLicencia").listar(Activo=1):
-            self.combo_tipo.addItem(t["Nombre"], t["IdTipoLicencia"])
+        self._cargar_combo_tipo()
         self.combo_tipo.currentIndexChanged.connect(self._tipo_cambio)
         form.addWidget(_titulo_campo("Tipo de licencia"))
         form.addWidget(self.combo_tipo)

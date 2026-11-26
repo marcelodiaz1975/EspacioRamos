@@ -2588,6 +2588,24 @@ def test_licencias_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, c
     assert panel.combo_profesional.findData(id_nuevo) >= 0
 
 
+def test_licencias_combo_tipo_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
+    """Bug real reportado por la clienta: "Creé un nuevo tipo de
+    licencia, y tuve que salir del programa y volver a ingresar para
+    poder usar ese concepto para registrar con un profesional" — el
+    combo "Tipo de licencia" se armaba una sola vez, al construir la
+    pantalla, y nunca se volvía a leer el catálogo."""
+    from PySide6.QtGui import QShowEvent
+
+    pantalla = PantallaRegistroAusencias(conn)
+    qtbot.addWidget(pantalla)
+    panel = pantalla.panel_licencias
+
+    id_nuevo = obtener_repositorio(conn, "TipoLicencia").crear(Nombre="Licencia nueva", Activo=1)
+    panel.showEvent(QShowEvent())
+
+    assert panel.combo_tipo.findData(id_nuevo) >= 0
+
+
 def test_ausencias_combo_profesional_se_actualiza_al_volver_a_la_solapa(qtbot, conn):
     """Bug real reportado por la clienta — mismo motivo que Vacaciones."""
     from PySide6.QtGui import QShowEvent
