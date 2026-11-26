@@ -58,7 +58,7 @@ En Linux/Mac el único cambio es la forma de activar el entorno virtual (`source
 python gui_main.py
 ```
 
-Sin argumentos usa `data\espacio_ramos.db` (se crea sola, junto con sus tablas y
+Sin argumentos usa `data\sistemadf.db` (se crea sola, junto con sus tablas y
 valores por defecto, si no existe). Se le puede pasar una ruta de base de datos
 distinta como único argumento:
 

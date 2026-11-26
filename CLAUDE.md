@@ -2212,3 +2212,45 @@ ya existente para el caso análogo de profesionales. pyflakes limpio en
 `app/gui/pantallas/novedades.py` y el archivo de test. Suite conjunta
 de `tests/test_gui_novedades.py`/`tests/test_licencias.py`: 158
 passed.
+
+## Base de datos: renombre a `sistemadf.db`
+
+Pedido explícito de la clienta: en vez de esperar un "final" de la
+revisión pantalla por pantalla (que en la práctica no tiene un punto
+de cierre fijo — sigue apareciendo algo nuevo en cada ronda), hacer el
+renombre ahora, con las precauciones correspondientes, en vez de
+dejarlo indefinidamente pendiente.
+
+`DB_PATH_DEFAULT` (`app/db/connection.py`) pasa de `data/espacio_
+ramos.db` a `data/sistemadf.db` — único lugar real del código que fija
+el nombre (`get_connection`/`init_database`/`main.py`/`gui_main.py`
+todos lo toman de esta constante, nunca lo repiten). Se revisó todo el
+repo (`grep` de "espacio_ramos" fuera de `docs/historial/`) antes de
+tocar nada, para no dejar una referencia vieja suelta: aparte de esta
+constante, solo quedaban un mención en `README.md` (actualizada al
+nuevo nombre) y un `assert` en `tests/test_connection.py` que compara
+contra el valor real de la constante (actualizado). El resto de las
+apariciones (`tests/test_backup.py`/`tests/test_instancia_unica.py`)
+son nombres de archivo ARBITRARIOS que esos tests usan para un
+`tmp_path` de prueba — no dependen del nombre real y funcionan igual
+con cualquier nombre, así que se dejan como estaban.
+
+**Importante, de cara al entorno real de la clienta:** este cambio
+es puramente de código — el archivo real `data/espacio_ramos.db` de
+su máquina NO se renombra solo. Sin el paso manual correspondiente,
+al levantar esta versión el programa va a buscar `data/sistemadf.db`,
+no lo va a encontrar, y le va a crear uno nuevo VACÍO con ese nombre
+(mismo mecanismo de `get_connection`/`init_database` que crea la base
+si no existe) — sin perder el archivo viejo, pero sin verlo tampoco.
+Paso a paso que tiene que hacer ella antes de levantar esta versión:
+1. Backup de `data/espacio_ramos.db` (por las dudas, aparte del
+   backup que ya hace el propio sistema).
+2. Renombrar ese archivo a `data/sistemadf.db` (mismo directorio).
+3. Levantar la versión nueva del código normalmente — va a encontrar
+   la base ya renombrada y seguir con todos los datos tal cual estaban.
+
+Tests actualizados: `tests/test_connection.py` (el `assert` contra
+`DB_PATH_DEFAULT`). pyflakes limpio en `app/db/connection.py` y el
+archivo de test. Suite conjunta de `tests/test_connection.py`/`tests/
+test_instancia_unica.py`/`tests/test_backup.py`/`tests/test_
+migraciones.py`: 93 passed.

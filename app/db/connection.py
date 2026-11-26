@@ -16,7 +16,7 @@ def _raiz_proyecto() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
-DB_PATH_DEFAULT = _raiz_proyecto() / "data" / "espacio_ramos.db"
+DB_PATH_DEFAULT = _raiz_proyecto() / "data" / "sistemadf.db"
 
 
 def get_connection(db_path: Path | str = DB_PATH_DEFAULT) -> sqlite3.Connection:

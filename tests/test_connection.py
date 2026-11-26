@@ -26,7 +26,7 @@ def test_db_path_default_no_depende_de_meipass_cuando_esta_empaquetado(monkeypat
     import app.db.connection as connection
     importlib.reload(connection)
     try:
-        assert connection.DB_PATH_DEFAULT == Path("/ruta/simulada") / "data" / "espacio_ramos.db"
+        assert connection.DB_PATH_DEFAULT == Path("/ruta/simulada") / "data" / "sistemadf.db"
     finally:
         monkeypatch.undo()
         importlib.reload(connection)
