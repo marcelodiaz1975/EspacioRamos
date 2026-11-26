@@ -1276,6 +1276,48 @@ def test_tildar_comentario_lo_incluye_en_el_pdf_generado(qtbot, conn, tmp_path, 
     assert "Alternativas ofrecidas" not in texto
 
 
+def test_comentario_libre_arranca_vacio(qtbot, conn, profesional_y_consultorio):
+    """Pedido explícito de la clienta: "un cuadro de texto libre para
+    agregar un comentario al final... como si fuera un punto como los
+    tres checks que están prefijados" — a diferencia de los checks (que
+    se recuerdan destildados siempre), este campo no tiene nada que
+    recordar: vacío en cada previsualización nueva."""
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+    armado = pantalla._armar_criterios()
+    id_profesional, globales, busquedas = armado
+    from app.negocio.oferta_busqueda_texto import previsualizar_documento
+
+    filas = previsualizar_documento(conn, id_profesional, globales, busquedas)
+    dialogo = _DialogoPrevisualizacion(filas, pantalla)
+    qtbot.addWidget(dialogo)
+
+    assert dialogo.comentario_libre() == ""
+
+
+def test_comentario_libre_se_recorta_y_se_incluye_en_el_pdf_generado(
+    qtbot, conn, tmp_path, monkeypatch, profesional_y_consultorio,
+):
+    conn.execute("UPDATE Configuracion SET CarpetaBaseArchivos = ? WHERE IdConfiguracion = 1", (str(tmp_path),))
+    conn.commit()
+
+    def _exec_con_comentario_libre(self):
+        self.campo_comentario_libre.setPlainText("  Traer el DNI el día de la reserva.  ")
+        return QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(_DialogoPrevisualizacion, "exec", _exec_con_comentario_libre)
+    pantalla = _PanelOferta(conn)
+    qtbot.addWidget(pantalla)
+    pantalla._checks_dia["Lunes"].setChecked(True)
+
+    pantalla._generar_pdf()
+
+    ruta = next((tmp_path / "Archivos varios" / "Oferta").iterdir())
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Traer el DNI el día de la reserva." in texto
+
+
 def test_seleccionar_solo_una_opcion_por_bloque_destilda_la_mas_corta(qtbot, conn, profesional_y_consultorio):
     """Ejemplo real de la clienta: un consultorio libre todo el rango
     pedido (9-18hs) y otro libre solo hasta las 14hs — buscando con

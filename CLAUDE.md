@@ -2112,3 +2112,64 @@ tocados. Suite conjunta de `tests/test_gui_widget_planilla_flotante.
 py`/`tests/test_planilla_flotante.py`/`tests/test_main_window.py`:
 116 passed (más el artefacto ya documentado de fin de proceso, sin
 afectar el resultado de ningún test).
+
+## Oferta de consultorios: comentario libre en la previsualización
+
+Pedido explícito de la clienta:
+
+> "Agregame en el cuadro de diálogo para generar el texto o el PDF un
+> cuadro de texto libre para agregar un comentario al final del
+> archivo o del texto generado como si fuera un punto como los tres
+> checks que están prefijados."
+
+El "cuadro de diálogo" es `_DialogoPrevisualizacion` (`app/gui/
+pantallas/oferta.py`), el mismo que ya tenía el cuadro "Comentarios a
+incluír" con los tres checks fijos ("Reservas regulares"/"Reservas
+aisladas"/"Alternativas ofrecidas", editables en "Textos del
+sistema"). Se le suma, debajo de esos tres y dentro del mismo
+`QGroupBox`, un `QPlainTextEdit` ("Comentario libre") + método
+`comentario_libre()` (texto recortado con `.strip()`). A diferencia de
+los tres checks (que recuerdan el estado de la búsqueda), este campo
+arranca vacío en cada previsualización — no hay nada que recordar, es
+puntual de esa generación.
+
+El valor viaja junto con `comentarios_incluidos` por toda la cadena ya
+existente — `_generar_y_mostrar` lo lee del diálogo y lo pasa a
+`generador(...)`, que a su vez lo reenvía a `generar_pdf_oferta_
+busqueda`/`generar_texto_oferta_busqueda` (ambos suman el parámetro
+`comentario_libre: str | None = None`, recortado también del lado del
+negocio por si se llama directo desde un test o desde otra pantalla
+sin pasar por este diálogo). En los dos casos se agrega como un punto
+más del mismo bloque "Comentarios"/"*Comentarios*", DESPUÉS de los
+tres fijos (si alguno está tildado) — mismo criterio de "la sección
+entera desaparece si no hay nada que mostrar" que ya regía para los
+fijos: vacío (tras `.strip()`) no agrega ninguna línea ni dispara el
+título "Comentarios" por sí solo.
+
+Para el PDF (`app/pdf/oferta_busqueda_pdf.py`, `_texto_comentario`):
+los tres comentarios fijos son texto de plantilla ya controlado (vía
+"Textos del sistema"), pero el comentario libre lo tipea la operadora
+al momento de cada generación — sin tratamiento, un "&"/"<"/">" suelto
+rompería el mini-XML que interpreta `Paragraph` de ReportLab. Se le
+aplica `xml.sax.saxutils.escape` (escapa esos tres caracteres) antes de
+reemplazar saltos de línea por `<br/>` (mismo patrón ya usado en
+`manual_pdf.py`/`placas_pdf.py` para texto libre con salto de línea en
+un PDF). Para el texto de WhatsApp (`app/negocio/oferta_busqueda_
+whatsapp.py`) no hace falta ningún escape — ahí el texto se copia tal
+cual al portapapeles, sin ningún parser de markup de por medio.
+
+Tests nuevos: `tests/test_gui_oferta.py` (+2: el campo arranca vacío en
+cada previsualización nueva, un comentario cargado con espacios de más
+llega recortado al PDF generado). `tests/test_oferta_busqueda_
+whatsapp.py` (+3: aparece como un punto más, vacío no agrega la
+sección, se suma después de los fijos). `tests/test_pdf_oferta_
+busqueda.py` (+3: mismos tres casos que el texto de WhatsApp, más uno
+de caracteres especiales sin romper el PDF). pyflakes limpio en
+`app/gui/pantallas/oferta.py`, `app/negocio/oferta_busqueda_whatsapp.
+py`, `app/pdf/oferta_busqueda_pdf.py` y los tres archivos de test
+tocados. Suite conjunta de `tests/test_gui_oferta.py`/`tests/test_
+oferta_busqueda_whatsapp.py`/`tests/test_pdf_oferta_busqueda.py`: 131
+passed, 1 failed — el fallo es el ya documentado de calibración de
+fuentes del sandbox (`test_grilla_reserva_alto_para_que_el_scroll_
+horizontal_no_tape_la_ultima_fila`, ver "Fallos conocidos del sandbox/
+contenedor" más arriba), ajeno a esta ronda.

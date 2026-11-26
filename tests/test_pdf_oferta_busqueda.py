@@ -479,4 +479,48 @@ def test_comentario_personalizado_no_aparece_si_no_se_tildo(conn, edificio_con_c
     ruta = generar_pdf_oferta_busqueda(conn, str(tmp_path), id_prof, globales, [_busqueda_simple()])
     texto = fitz.open(ruta)[0].get_text()
     assert "Texto personalizado de comentarios." not in texto
+
+
+# ------------------------------------------------------------------ comentario libre (#131)
+
+def test_comentario_libre_aparece_como_un_punto_mas(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: "un cuadro de texto libre para
+    agregar un comentario al final del archivo o del texto generado
+    como si fuera un punto como los tres checks que están prefijados"."""
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    ruta = generar_pdf_oferta_busqueda(
+        conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)],
+        comentario_libre="Traer el DNI el día de la reserva.",
+    )
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Comentarios" in texto
+    assert "Traer el DNI el día de la reserva." in texto
+
+
+def test_comentario_libre_vacio_no_agrega_la_seccion(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    ruta = generar_pdf_oferta_busqueda(
+        conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)], comentario_libre="   ",
+    )
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Comentarios" not in texto
+
+
+def test_comentario_libre_escapa_caracteres_especiales(conn, edificio_con_consultorio, tmp_path):
+    """Texto tipeado al momento por la operadora (no una plantilla ya
+    controlada, como los tres fijos) — un "&"/"<"/">" suelto no tiene
+    que romper el PDF."""
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    ruta = generar_pdf_oferta_busqueda(
+        conn, str(tmp_path), id_prof, globales, [_busqueda_simple(hora_desde=12, hora_hasta=14)],
+        comentario_libre="Precio < $5000 & con descuento",
+    )
+    texto = fitz.open(ruta)[0].get_text()
+    assert "Precio < $5000 & con descuento" in texto
     assert "Reservas regulares:" not in texto

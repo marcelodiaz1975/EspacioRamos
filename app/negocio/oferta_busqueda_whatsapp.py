@@ -45,17 +45,26 @@ from app.repositorio.registro import obtener_repositorio
 def generar_texto_oferta_busqueda(
     conn: sqlite3.Connection, id_profesional: int, globales: CriteriosGlobales, busquedas: list[Busqueda],
     excluir: set[tuple[int, int, int]] | None = None, comentarios_incluidos: set[str] | None = None,
+    comentario_libre: str | None = None,
 ) -> str:
     """Devuelve el texto completo, listo para copiar y pegar en WhatsApp.
 
     `comentarios_incluidos` — subconjunto de las claves de
     `app.negocio.oferta_busqueda_texto.comentarios_fijos` a mostrar
     (checks "Comentarios a incluír" de la previsualización, todos
-    destildados por defecto): ninguno si no viene nada."""
+    destildados por defecto): ninguno si no viene nada.
+
+    `comentario_libre` — texto suelto, tipeado por la operadora en esa
+    misma previsualización ("Comentario libre", pedido explícito: "un
+    cuadro de texto libre para agregar un comentario al final... como
+    si fuera un punto como los tres checks que están prefijados") — se
+    agrega como una línea más del mismo bloque "Comentarios", después
+    de los fijos, solo si no viene vacío."""
     if not busquedas:
         raise ValueError("La búsqueda necesita al menos una franja")
     excluir = excluir or set()
     comentarios_incluidos = comentarios_incluidos or set()
+    comentario_libre = (comentario_libre or "").strip()
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
@@ -108,6 +117,8 @@ def generar_texto_oferta_busqueda(
     # vacío, mismo criterio que el resto de los bloques opcionales de
     # este mecanismo (ej. `{bloque_feriados}` del Mensaje grupal).
     comentario += [f"- {t}" for t in comentarios_fijos(conn, comentarios_incluidos)]
+    if comentario_libre:
+        comentario.append(f"- {comentario_libre}")
     bloque_comentario = ("\n\n*Comentarios*\n" + "\n".join(comentario)) if comentario else ""
 
     plantilla = resolver_plantilla(conn, "oferta_busqueda_whatsapp", DEFAULT_OFERTA_BUSQUEDA_WHATSAPP)

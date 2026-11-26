@@ -257,7 +257,15 @@ class _DialogoPrevisualizacion(QDialog):
     - Cuadro "Comentarios a incluír" (arriba de los botones): los tres
       comentarios fijos de "Textos del sistema", todos destildados por
       defecto — solo entra al documento final el que esté tildado en
-      esta generación puntual."""
+      esta generación puntual.
+    - Debajo de esos tres, un cuadro de texto libre ("Comentario libre")
+      para un comentario puntual de ESTA generación (pedido explícito de
+      la clienta: "un cuadro de texto libre para agregar un comentario
+      al final del archivo o del texto generado como si fuera un punto
+      como los tres checks que están prefijados") — a diferencia de los
+      tres fijos, no se guarda en "Textos del sistema" ni se recuerda de
+      una búsqueda a la siguiente: vacío por defecto, se escribe de
+      cero cada vez."""
 
     def __init__(self, filas: list[tuple[int, int, int, str, float, float]], parent=None):
         super().__init__(parent)
@@ -291,6 +299,10 @@ class _DialogoPrevisualizacion(QDialog):
             casilla = QCheckBox(etiqueta)
             self._casillas_comentario[clave] = casilla
             layout_comentarios.addWidget(casilla)
+        layout_comentarios.addWidget(QLabel("Comentario libre:"))
+        self.campo_comentario_libre = QPlainTextEdit()
+        self.campo_comentario_libre.setFixedHeight(60)
+        layout_comentarios.addWidget(self.campo_comentario_libre)
         layout.addWidget(cuadro_comentarios)
 
         fila_botones = QHBoxLayout()
@@ -326,6 +338,9 @@ class _DialogoPrevisualizacion(QDialog):
 
     def comentarios_incluidos(self) -> set[str]:
         return {clave for clave, casilla in self._casillas_comentario.items() if casilla.isChecked()}
+
+    def comentario_libre(self) -> str:
+        return self.campo_comentario_libre.toPlainText().strip()
 
 
 class _PanelOferta(QWidget):
@@ -1059,27 +1074,29 @@ class _PanelOferta(QWidget):
             return
         excluir = dialogo.excluidas()
         comentarios_incluidos = dialogo.comentarios_incluidos()
+        comentario_libre = dialogo.comentario_libre()
 
         try:
-            generador(id_profesional, globales, busquedas, excluir, comentarios_incluidos)
+            generador(id_profesional, globales, busquedas, excluir, comentarios_incluidos, comentario_libre)
         except ValueError as error:
             QMessageBox.warning(self, "Oferta de consultorios", str(error))
             return
         self._limpiar_franjas()
 
     def _generar_pdf(self) -> None:
-        def hacer(id_profesional, globales, busquedas, excluir, comentarios_incluidos) -> None:
+        def hacer(id_profesional, globales, busquedas, excluir, comentarios_incluidos, comentario_libre) -> None:
             directorio = str(carpeta_archivos_varios(self.conn, SUBCARPETA_OFERTA))
             ruta = generar_pdf_oferta_busqueda(
                 self.conn, directorio, id_profesional, globales, busquedas, excluir, comentarios_incluidos,
+                comentario_libre,
             )
             QMessageBox.information(self, "Oferta de consultorios", f"Se generó:\n{ruta}")
         self._generar_y_mostrar(hacer)
 
     def _generar_texto(self) -> None:
-        def hacer(id_profesional, globales, busquedas, excluir, comentarios_incluidos) -> None:
+        def hacer(id_profesional, globales, busquedas, excluir, comentarios_incluidos, comentario_libre) -> None:
             texto = generar_texto_oferta_busqueda(
-                self.conn, id_profesional, globales, busquedas, excluir, comentarios_incluidos,
+                self.conn, id_profesional, globales, busquedas, excluir, comentarios_incluidos, comentario_libre,
             )
             _DialogoTexto(texto, self).exec()
         self._generar_y_mostrar(hacer)

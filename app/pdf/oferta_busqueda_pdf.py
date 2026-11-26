@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from xml.sax.saxutils import escape
 
 from reportlab.lib.units import cm
 from reportlab.platypus import Paragraph, Spacer
@@ -94,6 +95,7 @@ def _texto_alternativas(
 
 def _texto_comentario(
     conn: sqlite3.Connection, ids_edificio_resultado: set[int], mostrar_edificio: bool, comentarios_incluidos: set[str],
+    comentario_libre: str = "",
 ) -> list:
     """Sin título de nivel 2 propio — va pegado abajo de las alternativas,
     con el mismo estilo de etiqueta en negrita que "Alternativa N".
@@ -110,10 +112,22 @@ def _texto_comentario(
     previsualización ("Comentarios a incluír"), todos destildados por
     defecto — así que esta sección puede volver a quedar vacía del todo
     (el llamador no la agrega si `_texto_comentario` devuelve una lista
-    vacía de líneas de contenido)."""
+    vacía de líneas de contenido).
+
+    `comentario_libre` — texto suelto tipeado por la operadora en esa
+    misma previsualización ("Comentario libre", pedido explícito: "un
+    cuadro de texto libre... como si fuera un punto como los tres
+    checks que están prefijados") — se agrega como un punto más, al
+    final, solo si no viene vacío. `escape` (XML, no HTML) por tratarse
+    de texto libre tipeado al momento, a diferencia de los tres fijos
+    (texto de plantilla ya controlado) — sin esto, un "&"/"<"/">" suelto
+    rompería el mini-XML que interpreta `Paragraph`."""
     style = estilo_texto(9)
     lineas = [Paragraph(f"* {t}", style) for t in edificios_comentario(conn, ids_edificio_resultado)] if mostrar_edificio else []
     lineas += [Paragraph(f"* {t}", style) for t in comentarios_fijos(conn, comentarios_incluidos)]
+    if comentario_libre:
+        texto_libre = escape(comentario_libre).replace("\n", "<br/>")
+        lineas.append(Paragraph(f"* {texto_libre}", style))
     if not lineas:
         return []
     return [Paragraph("<b>Comentarios</b>", style), Spacer(1, 2)] + lineas
@@ -177,7 +191,7 @@ def _bloque_consultorios_intervinientes(
 def generar_pdf_oferta_busqueda(
     conn: sqlite3.Connection, directorio: str, id_profesional: int, globales: CriteriosGlobales,
     busquedas: list[Busqueda], excluir: set[tuple[int, int, int]] | None = None,
-    comentarios_incluidos: set[str] | None = None,
+    comentarios_incluidos: set[str] | None = None, comentario_libre: str | None = None,
 ) -> str:
     """Genera el PDF de Oferta de consultorios a partir de una búsqueda
     ad-hoc y devuelve la ruta completa. `busquedas` es la lista de franjas de la búsqueda global,
@@ -194,11 +208,16 @@ def generar_pdf_oferta_busqueda(
     `comentarios_incluidos` — subconjunto de las claves de `app.negocio.
     oferta_busqueda_texto.comentarios_fijos` a mostrar en "Comentarios"
     (checks "Comentarios a incluír" de la previsualización, todos
-    destildados por defecto): ninguno si no viene nada."""
+    destildados por defecto): ninguno si no viene nada.
+
+    `comentario_libre` — texto suelto tipeado por la operadora en esa
+    misma previsualización ("Comentario libre"), que se agrega como un
+    punto más del mismo bloque "Comentarios"."""
     if not busquedas:
         raise ValueError("La búsqueda necesita al menos una franja")
     excluir = excluir or set()
     comentarios_incluidos = comentarios_incluidos or set()
+    comentario_libre = (comentario_libre or "").strip()
 
     profesional = obtener_repositorio(conn, "Profesional").obtener(id_profesional)
     if profesional is None:
@@ -247,7 +266,9 @@ def generar_pdf_oferta_busqueda(
         # aclarar la dirección de un nombre que no aparece en ningún
         # lado no tiene sentido (y de paso revelaría ubicación exacta
         # que el modo justamente quiere evitar).
-        comentario = _texto_comentario(conn, ids_edificio_resultado, mostrar_edificio and mostrar_unidad, comentarios_incluidos)
+        comentario = _texto_comentario(
+            conn, ids_edificio_resultado, mostrar_edificio and mostrar_unidad, comentarios_incluidos, comentario_libre,
+        )
         if comentario:
             story.append(Spacer(1, 8))
             story.extend(comentario)

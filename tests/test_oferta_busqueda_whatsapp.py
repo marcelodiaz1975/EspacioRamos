@@ -181,6 +181,41 @@ def test_comentario_personalizado_no_aparece_si_no_se_tildo(conn, edificio_con_c
     assert "Texto personalizado de comentarios." not in texto
 
 
+# ------------------------------------------------------------------ comentario libre (#131)
+
+def test_comentario_libre_aparece_como_un_punto_mas(conn, edificio_con_consultorio, tmp_path):
+    """Pedido explícito de la clienta: "un cuadro de texto libre para
+    agregar un comentario al final... como si fuera un punto como los
+    tres checks que están prefijados"."""
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    texto = generar_texto_oferta_busqueda(
+        conn, id_prof, globales, [_busqueda_simple()], comentario_libre="Traer el DNI el día de la reserva.",
+    )
+    assert "*Comentarios*" in texto
+    assert "- Traer el DNI el día de la reserva." in texto
+
+
+def test_comentario_libre_vacio_no_agrega_nada(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    texto = generar_texto_oferta_busqueda(conn, id_prof, globales, [_busqueda_simple()], comentario_libre="   ")
+    assert "*Comentarios*" not in texto
+
+
+def test_comentario_libre_se_suma_despues_de_los_fijos(conn, edificio_con_consultorio, tmp_path):
+    id_edificio, _, _ = edificio_con_consultorio
+    id_prof = obtener_repositorio(conn, "Profesional").crear(CategoriaProfesional="R", Apellido="Prueba")
+    globales = CriteriosGlobales(tipo_busqueda="Regular", ids_edificio=[id_edificio])
+    texto = generar_texto_oferta_busqueda(
+        conn, id_prof, globales, [_busqueda_simple()],
+        comentarios_incluidos={COMENTARIO_RESERVAS_REGULARES}, comentario_libre="Comentario puntual.",
+    )
+    assert texto.index("Reservas regulares:") < texto.index("Comentario puntual.")
+
+
 def test_aislada_incluye_rango_de_fechas(conn, tmp_path):
     id_edificio = obtener_repositorio(conn, "Edificio").crear(Nombre="Ramos 1")
     id_unidad = obtener_repositorio(conn, "Unidad").crear(IdEdificio=id_edificio, Departamento='7mo "L"')
