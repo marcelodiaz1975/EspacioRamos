@@ -351,6 +351,71 @@ def test_sin_seleccion_combinar_no_hace_nada(planilla):
     planilla._combinar_celdas()  # no debe romper sin ninguna celda seleccionada
 
 
+# --------------------------------------------------------------------------- copiar/pegar
+
+def test_copiar_y_pegar_una_sola_celda(planilla):
+    """Pedido explícito: "los botones de copiar y pegar, para copiar
+    celdas o rangos de celdas"."""
+    _escribir(planilla, 0, 0, "10")
+    planilla.tabla.setCurrentCell(0, 0)
+    planilla._copiar()
+    planilla.tabla.setCurrentCell(2, 2)
+    planilla._pegar()
+    assert planilla.tabla.item(2, 2).text() == "10"
+
+
+def test_copiar_y_pegar_copia_tambien_el_formato(planilla):
+    planilla.tabla.setCurrentCell(0, 0)
+    planilla.boton_negrita.setChecked(True)
+    planilla._alternar_negrita()
+    planilla._copiar()
+    planilla.tabla.setCurrentCell(1, 1)
+    planilla._pegar()
+    assert planilla._estilo_en(1, 1)["negrita"] is True
+
+
+def test_copiar_y_pegar_un_rango_mantiene_la_forma(planilla):
+    """Copiar un rango de 2x1 y pegarlo en otro lado reproduce la misma
+    forma relativa, anclada en la celda donde se pega."""
+    _escribir(planilla, 0, 0, "1")
+    _escribir(planilla, 1, 0, "2")
+    planilla.tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 0), True)
+    planilla._copiar()
+    planilla.tabla.setCurrentCell(5, 5)
+    planilla._pegar()
+    assert planilla.tabla.item(5, 5).text() == "1"
+    assert planilla.tabla.item(6, 5).text() == "2"
+
+
+def test_pegar_cerca_del_borde_descarta_las_celdas_que_quedan_afuera(planilla):
+    """Pegar un rango que se saldría de la grilla no rompe nada — las
+    celdas fuera de rango se descartan sin más."""
+    _escribir(planilla, 0, 0, "1")
+    _escribir(planilla, 1, 0, "2")
+    planilla.tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 0), True)
+    planilla._copiar()
+    ultima_fila = planilla.tabla.rowCount() - 1
+    planilla.tabla.setCurrentCell(ultima_fila, 0)
+    planilla._pegar()  # no debe lanzar ninguna excepción
+    assert planilla.tabla.item(ultima_fila, 0).text() == "1"
+
+
+def test_pegar_sin_copiar_antes_no_hace_nada(planilla):
+    """Portapapeles vacío a propósito (en vez de solo confiar en que
+    ningún test anterior haya copiado algo sobre la misma instancia
+    compartida, ver `_instancia_compartida`) — confirma que pegar sin
+    nada copiado no cambia lo que ya hubiera en la celda, sea lo que
+    sea."""
+    planilla._portapapeles = []
+    planilla.tabla.setCurrentCell(0, 0)
+    item_antes = planilla.tabla.item(0, 0)
+    texto_antes = item_antes.text() if item_antes is not None else None
+    planilla._pegar()
+    item_despues = planilla.tabla.item(0, 0)
+    texto_despues = item_despues.text() if item_despues is not None else None
+    assert texto_despues == texto_antes
+
+
 # ------------------------------------------------------------------------ ancho de botones
 
 def test_todos_los_botones_de_estilo_tienen_el_mismo_ancho(planilla):
@@ -358,9 +423,10 @@ def test_todos_los_botones_de_estilo_tienen_el_mismo_ancho(planilla):
     reducí el ancho de los mismos" — mismo criterio del resto del
     sistema, ancho fijo único para todos."""
     botones = (
-        planilla.boton_negrita, planilla.boton_color_texto, planilla.boton_color_fondo,
-        planilla.boton_formato_numero, planilla.boton_alinear_izquierda, planilla.boton_alinear_centro,
-        planilla.boton_alinear_derecha, planilla.boton_combinar, planilla.boton_vaciar_todo,
+        planilla.boton_copiar, planilla.boton_pegar, planilla.boton_negrita, planilla.boton_color_texto,
+        planilla.boton_color_fondo, planilla.boton_formato_numero, planilla.boton_alinear_izquierda,
+        planilla.boton_alinear_centro, planilla.boton_alinear_derecha, planilla.boton_combinar,
+        planilla.boton_vaciar_todo,
     )
     anchos = {b.width() for b in botones}
     assert len(anchos) == 1

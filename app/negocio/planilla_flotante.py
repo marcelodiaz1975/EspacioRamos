@@ -24,15 +24,69 @@ recursivamente contra el contenido crudo de TODAS las celdas
 (`valor_celda`), con detección de referencia circular. Una celda sin "="
 ni "+" nunca es fórmula, aunque su texto parezca una cuenta — eso es
 justo lo que permite "anotar" texto/números sueltos sin que el sistema
-intente calcularlos."""
+intente calcularlos.
+
+Única excepción al "sin funciones" de arriba, agregada a pedido
+explícito de la clienta ("¿se puede crear una fórmula sola como para
+sumar un rango de celdas?", tras explicarle que sin esto hay que
+nombrar cada celda sumada con "+"): `SUMA(C2:C10)` suma todas las
+celdas del rectángulo entre las dos esquinas dadas (soporta rangos de
+una sola columna/fila o un bloque de varias, igual que Excel) —
+`_PATRON_RANGO` la reemplaza por el número ya calculado ANTES de que
+`_PATRON_CELDA` procese el resto de la fórmula, así que "=SUMA(C2:C10)
++D1" sigue funcionando (el "+D1" lo resuelve el mecanismo de siempre).
+Cada celda del rango pasa por `valor_celda` con el mismo `_visitando`
+de la fórmula que contiene el `SUMA(...)` — una referencia circular
+dentro del rango (ej. sumar un rango que se incluye a sí misma) se
+detecta igual que una referencia circular suelta. Sigue siendo la
+ÚNICA función disponible — "no fórmulas complejas" es el pedido
+original, esto es una excepción puntual, no una apertura a más
+funciones."""
 from __future__ import annotations
 
 import re
 import sqlite3
 
 _PATRON_CELDA = re.compile(r"[A-Z]+[0-9]+")
+_PATRON_RANGO = re.compile(r"SUMA\(([A-Z]+[0-9]+):([A-Z]+[0-9]+)\)")
+_PATRON_DIRECCION = re.compile(r"([A-Z]+)([0-9]+)")
 _CARACTERES_FORMULA_VALIDOS = set("0123456789.+-*/() ")
 _PREFIJOS_FORMULA = ("=", "+")
+
+
+def _indice_columna(letras: str) -> int:
+    """"A" -> 0, "B" -> 1... "Z" -> 25 (y, de yapa, "AA" -> 26... aunque
+    la grilla de la GUI no llega a usar columnas de dos letras) — mismo
+    algoritmo base-26 estándar de cualquier planilla de cálculo."""
+    indice = 0
+    for letra in letras:
+        indice = indice * 26 + (ord(letra) - ord("A") + 1)
+    return indice - 1
+
+
+def _letra_desde_indice(indice: int) -> str:
+    letras = ""
+    indice += 1
+    while indice > 0:
+        indice, resto = divmod(indice - 1, 26)
+        letras = chr(ord("A") + resto) + letras
+    return letras
+
+
+def _celdas_en_rango(inicio: str, fin: str) -> list[str]:
+    """Todas las direcciones del rectángulo entre `inicio` y `fin`
+    (cualquiera de los dos puede ser la esquina "menor"), en orden de
+    fila y luego columna — el orden no afecta la suma, solo importa
+    que la lista sea siempre la misma para el mismo rango."""
+    col_inicio, fila_inicio = _PATRON_DIRECCION.match(inicio).groups()
+    col_fin, fila_fin = _PATRON_DIRECCION.match(fin).groups()
+    col_min, col_max = sorted((_indice_columna(col_inicio), _indice_columna(col_fin)))
+    fila_min, fila_max = sorted((int(fila_inicio), int(fila_fin)))
+    return [
+        f"{_letra_desde_indice(columna)}{fila}"
+        for fila in range(fila_min, fila_max + 1)
+        for columna in range(col_min, col_max + 1)
+    ]
 
 
 def _es_formula(contenido: str) -> bool:
@@ -74,11 +128,17 @@ def valor_celda(
 
 
 def _evaluar_formula(celdas: dict[str, str], formula: str, visitando: frozenset[str]) -> float:
+    def _reemplazar_rango(coincidencia: re.Match) -> str:
+        referencias = _celdas_en_rango(coincidencia.group(1), coincidencia.group(2))
+        total = sum((valor_celda(celdas, ref, visitando) or 0.0) for ref in referencias)
+        return repr(total)
+
     def _reemplazar(coincidencia: re.Match) -> str:
         valor = valor_celda(celdas, coincidencia.group().upper(), visitando)
         return repr(valor if valor is not None else 0.0)
 
-    expresion = _PATRON_CELDA.sub(_reemplazar, formula.upper())
+    formula_mayus = _PATRON_RANGO.sub(_reemplazar_rango, formula.upper())
+    expresion = _PATRON_CELDA.sub(_reemplazar, formula_mayus)
     if not expresion.strip() or any(c not in _CARACTERES_FORMULA_VALIDOS for c in expresion):
         raise ErrorFormula("Fórmula inválida")
     try:

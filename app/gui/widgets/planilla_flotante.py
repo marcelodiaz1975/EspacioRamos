@@ -226,6 +226,10 @@ class PlanillaFlotante(QWidget):
         self._punto_columna: int | None = None
         self._puntero_activo = False
         self._texto_antes_del_puntero: str | None = None
+        # Portapapeles interno de "Copiar"/"Pegar" (ver `_copiar`/
+        # `_pegar`) — posición RELATIVA de cada celda copiada dentro
+        # del rectángulo, no la posición absoluta.
+        self._portapapeles: list[tuple[int, int, dict]] = []
 
         layout = QVBoxLayout(self)
 
@@ -241,6 +245,10 @@ class PlanillaFlotante(QWidget):
         layout.addLayout(fila_formula)
 
         fila_estilos = QHBoxLayout()
+        self.boton_copiar = QPushButton("Copiar")
+        self.boton_copiar.clicked.connect(self._copiar)
+        self.boton_pegar = QPushButton("Pegar")
+        self.boton_pegar.clicked.connect(self._pegar)
         self.boton_negrita = QPushButton("Negrita")
         self.boton_negrita.setCheckable(True)
         self.boton_negrita.clicked.connect(self._alternar_negrita)
@@ -262,9 +270,9 @@ class PlanillaFlotante(QWidget):
         self.boton_vaciar_todo = QPushButton("Vaciar todo")
         self.boton_vaciar_todo.clicked.connect(self._vaciar_todo)
         botones = (
-            self.boton_negrita, self.boton_color_texto, self.boton_color_fondo,
-            self.boton_formato_numero, self.boton_alinear_izquierda, self.boton_alinear_centro,
-            self.boton_alinear_derecha, self.boton_combinar, self.boton_vaciar_todo,
+            self.boton_copiar, self.boton_pegar, self.boton_negrita, self.boton_color_texto,
+            self.boton_color_fondo, self.boton_formato_numero, self.boton_alinear_izquierda,
+            self.boton_alinear_centro, self.boton_alinear_derecha, self.boton_combinar, self.boton_vaciar_todo,
         )
         # Pedido explícito: "que los botones queden en una sola fila,
         # reducí el ancho de los mismos" — mismo criterio que el resto
@@ -613,6 +621,44 @@ class PlanillaFlotante(QWidget):
             self.tabla.setSpan(fila_min, columna_min, 1, 1)
         else:
             self.tabla.setSpan(fila_min, columna_min, fila_max - fila_min + 1, columna_max - columna_min + 1)
+
+    def _copiar(self) -> None:
+        """Pedido explícito: "los botones de copiar y pegar, para copiar
+        celdas o rangos de celdas" — copia contenido Y formato (mismo
+        criterio que el resto de los botones de esta planilla) de la
+        selección actual (o la celda actual, sin ninguna selección) a
+        un portapapeles interno, guardando la posición RELATIVA de cada
+        celda dentro del rectángulo copiado, para poder reproducir la
+        misma forma al pegar en otro lugar. No ajusta referencias de
+        fórmula al pegar en otra posición (ej. "=A1+1" se pega tal
+        cual, no se corre a "=A2+1") — mismo criterio de "sin fórmulas
+        complejas" del resto del motor."""
+        indices = {(idx.row(), idx.column()) for idx in self.tabla.selectedIndexes()}
+        if not indices and self._fila_actual is not None:
+            indices = {(self._fila_actual, self._columna_actual)}
+        if not indices:
+            return
+        fila_base = min(f for f, _ in indices)
+        columna_base = min(c for _, c in indices)
+        self._portapapeles = [
+            (fila - fila_base, columna - columna_base, dict(self._estilo(_id_celda(fila, columna))))
+            for fila, columna in indices
+        ]
+
+    def _pegar(self) -> None:
+        """Pega lo copiado, anclado en la celda ACTUAL (equivale a la
+        esquina superior-izquierda del rectángulo que se copió) — las
+        celdas que caigan afuera de la grilla (pegar cerca de un borde)
+        se descartan sin romper nada."""
+        if not self._portapapeles or self._fila_actual is None:
+            return
+        for delta_fila, delta_columna, estilo in self._portapapeles:
+            fila = self._fila_actual + delta_fila
+            columna = self._columna_actual + delta_columna
+            if 0 <= fila < _FILAS and 0 <= columna < _COLUMNAS:
+                self._guardar_sin_recalcular(_id_celda(fila, columna), dict(estilo))
+        self._recalcular_textos()
+        self._cargar_barra_formula()
 
     def _borrar_contenido_seleccion(self) -> None:
         self._aplicar_a_seleccion(lambda estilo: estilo.__setitem__("contenido", ""))

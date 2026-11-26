@@ -2254,3 +2254,95 @@ Tests actualizados: `tests/test_connection.py` (el `assert` contra
 archivo de test. Suite conjunta de `tests/test_connection.py`/`tests/
 test_instancia_unica.py`/`tests/test_backup.py`/`tests/test_
 migraciones.py`: 93 passed.
+
+Aparte, se le confirmó a la clienta que el archivo de bloqueo
+(`espacio_ramos.db.lock`) NO hace falta renombrarlo a mano —
+`BloqueoInstanciaUnica` (`app/negocio/instancia_unica.py`) lo deriva
+siempre del nombre de la base (`db_path.name + ".lock"`), así que en
+cuanto la base quede renombrada y se levante la versión nueva, el
+`.lock` nuevo (`sistemadf.db.lock`) se crea solo. El viejo queda
+huérfano pero inofensivo (es un archivo de control, no de datos) —
+se puede borrar sin problema, no es obligatorio.
+
+## F2 - Planilla auxiliar: botones Copiar/Pegar + fórmula SUMA(rango)
+
+Dos pedidos puntuales de la clienta sobre la planilla flotante:
+
+> "Agregame los botones de copiar y pegar, para copiar celdas o
+> rangos de celdas"
+> "Se puede crear una fórmula sola como para sumar un rango de
+> celdas..?"
+
+### Botones Copiar/Pegar
+
+`_copiar`/`_pegar` (`app/gui/widgets/planilla_flotante.py`), nuevos,
+primeros de la fila de botones (antes de "Negrita"). `_copiar` guarda
+en un portapapeles interno (`self._portapapeles`, una lista nueva —
+NO el portapapeles del sistema operativo, es copiar/pegar DENTRO de
+la planilla) la posición RELATIVA de cada celda de la selección
+actual (o la celda actual, sin selección) dentro del rectángulo
+copiado, junto con su estilo completo (contenido, negrita, colores,
+formato número, alineación — mismo criterio "todo junto" que ya usa
+`_estilo`/`_aplicar_a_seleccion` para el resto de los botones).
+`_pegar` reproduce esa misma forma relativa anclada en la celda
+ACTUAL (la que tenga el foco al apretar "Pegar") — las celdas que
+caerían afuera de la grilla al pegar cerca de un borde se descartan
+sin romper nada.
+
+No ajusta referencias de fórmula al pegar en otra posición (ej.
+"=A1+1" se pega tal cual, no se corre a "=A2+1") — a propósito, mismo
+criterio de "sin fórmulas complejas" del resto del motor; un
+ajuste de referencias relativas al estilo Excel es una pieza bastante
+más grande que lo que se pidió ("copiar celdas o rangos de celdas").
+
+Tests nuevos en `tests/test_gui_widget_planilla_flotante.py`:
+`test_copiar_y_pegar_una_sola_celda`, `test_copiar_y_pegar_copia_
+tambien_el_formato`, `test_copiar_y_pegar_un_rango_mantiene_la_
+forma`, `test_pegar_cerca_del_borde_descarta_las_celdas_que_quedan_
+afuera`, `test_pegar_sin_copiar_antes_no_hace_nada` (portapapeles
+vacío a propósito, en vez de confiar en que ningún test anterior
+sobre la misma instancia compartida haya copiado algo — ver
+`_instancia_compartida`). `test_todos_los_botones_de_estilo_tienen_
+el_mismo_ancho` actualizado para incluir los dos botones nuevos en
+el chequeo de ancho uniforme.
+
+### `SUMA(rango)`: única excepción al motor "sin funciones"
+
+Pedido explícito de la clienta, repitiendo la pregunta de una ronda
+anterior (donde se le explicó que solo se podía sumar nombrando cada
+celda con "+") — esta vez se agrega de verdad. `_PATRON_RANGO`
+(`app/negocio/planilla_flotante.py`) reconoce `SUMA(C2:C10)` (también
+bloques de varias columnas/filas, ej. `SUMA(A1:B10)`, igual que
+Excel) y lo reemplaza por el número ya calculado ANTES de que
+`_PATRON_CELDA` procese el resto de la fórmula — así que
+"=SUMA(C2:C10)+D1" sigue funcionando (el "+D1" lo resuelve el
+mecanismo de siempre). `_indice_columna`/`_letra_desde_indice`/
+`_celdas_en_rango`, nuevas, hacen la conversión letra↔índice de
+columna (base-26 estándar de cualquier planilla) y expanden las dos
+esquinas del rango a la lista de direcciones del rectángulo entre
+ellas (funciona con las esquinas en cualquier orden, ej. "SUMA(C4:C2)"
+suma igual que "SUMA(C2:C4)"). Cada celda del rango pasa por
+`valor_celda` con el mismo `_visitando` de la fórmula que la
+contiene, así que una referencia circular adentro del rango (ej.
+sumar un rango que se incluye a sí misma) se detecta igual que una
+referencia circular suelta — sin código nuevo para eso, reutiliza el
+mecanismo existente. Sigue siendo la ÚNICA función disponible —
+"no fórmulas complejas" sigue siendo el criterio, esto es una
+excepción puntual pedida explícitamente, no una apertura a sumar más
+funciones sin que se pidan.
+
+Tests nuevos en `tests/test_planilla_flotante.py`:
+`test_valor_celda_suma_rango_de_una_columna`, `test_valor_celda_suma_
+rango_rectangular` (bloque de varias filas Y columnas),
+`test_valor_celda_suma_rango_con_mas_sigue_siendo_formula` (combinado
+con el resto de la fórmula), `test_valor_celda_suma_rango_ignora_
+celdas_sin_numero`, `test_valor_celda_suma_rango_con_esquinas_
+invertidas`, `test_valor_celda_suma_rango_detecta_referencia_
+circular`, `test_texto_resultado_celda_suma_rango`.
+
+pyflakes limpio en `app/gui/widgets/planilla_flotante.py`,
+`app/negocio/planilla_flotante.py` y los dos archivos de test
+tocados. Suite conjunta de `tests/test_gui_widget_planilla_flotante.
+py`/`tests/test_planilla_flotante.py`/`tests/test_main_window.py`:
+128 passed (más el artefacto ya documentado de fin de proceso, sin
+afectar el resultado de ningún test).

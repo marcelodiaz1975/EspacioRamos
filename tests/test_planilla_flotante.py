@@ -109,6 +109,51 @@ def test_valor_celda_menos_al_principio_no_es_formula():
     assert valor_celda({"A1": "-500"}, "A1") == -500.0
 
 
+# ---------------------------------------------------------------------- SUMA(rango) (#132)
+
+def test_valor_celda_suma_rango_de_una_columna():
+    celdas = {"C2": "10", "C3": "20", "C4": "30", "A1": "=SUMA(C2:C4)"}
+    assert valor_celda(celdas, "A1") == 60.0
+
+
+def test_valor_celda_suma_rango_rectangular():
+    """`SUMA` soporta un bloque de varias filas Y columnas, no solo una
+    columna/fila sola — mismo criterio que Excel."""
+    celdas = {"A1": "5", "B1": "7", "A2": "9", "B2": "2", "X1": "=SUMA(A1:B2)"}
+    assert valor_celda(celdas, "X1") == 23.0
+
+
+def test_valor_celda_suma_rango_con_mas_sigue_siendo_formula():
+    celdas = {"C2": "10", "C3": "20", "A1": "+SUMA(C2:C3)+5"}
+    assert valor_celda(celdas, "A1") == 35.0
+
+
+def test_valor_celda_suma_rango_ignora_celdas_sin_numero():
+    """Una celda de nota suelta dentro del rango se trata como 0 —
+    mismo criterio que una referencia individual a una celda no
+    numérica."""
+    celdas = {"C2": "10", "C3": "texto", "A1": "=SUMA(C2:C3)"}
+    assert valor_celda(celdas, "A1") == 10.0
+
+
+def test_valor_celda_suma_rango_con_esquinas_invertidas():
+    """El orden de las dos esquinas no importa — "C4:C2" suma lo mismo
+    que "C2:C4"."""
+    celdas = {"C2": "10", "C3": "20", "C4": "30", "A1": "=SUMA(C4:C2)"}
+    assert valor_celda(celdas, "A1") == 60.0
+
+
+def test_valor_celda_suma_rango_detecta_referencia_circular():
+    celdas = {"A1": "=SUMA(A1:A2)", "A2": "5"}
+    with pytest.raises(ErrorFormula):
+        valor_celda(celdas, "A1")
+
+
+def test_texto_resultado_celda_suma_rango():
+    celdas = {"C2": "10", "C3": "20", "A1": "=SUMA(C2:C3)"}
+    assert texto_resultado_celda(celdas, "A1") == "30"
+
+
 # ------------------------------------------------------------------- texto_resultado_celda
 
 def test_texto_resultado_celda_sin_formula_devuelve_tal_cual():
