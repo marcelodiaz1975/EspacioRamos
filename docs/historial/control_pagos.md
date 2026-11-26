@@ -717,3 +717,13 @@ actualizados con el método `numero_transaccion()` nuevo). Suite:
 avance_mes.py`/`test_catalogos.py` (los 3 fallos de `test_avance_mes.py`
 son los conocidos por el reloj real del sandbox, ajenos a esta ronda).
 pyflakes limpio en los cuatro archivos tocados.
+
+## Carga y control: etiquetas "Saldo a cubrir Bco {Nombre}"
+
+Pedido explícito de la clienta: "Saldo a cubrir en CA Bco Patagonia"/
+"...en CA Bco Provincia" pasan a "Saldo a cubrir Bco Patagonia"/"...Bco
+Provincia" — mismo formato que ya tenían Hipotecario/Macro, sin el "en
+CA" de más (`_actualizar_etiquetas_expensas_bancos`, `app/gui/
+pantallas/control_pagos.py`). Test actualizado: `test_etiquetas_
+expensas_y_saldos_bancarios_muestran_los_valores_de_saldos_expensas_y_
+bancos`.

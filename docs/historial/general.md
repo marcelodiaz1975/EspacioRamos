@@ -4973,3 +4973,408 @@ depender de ninguna traducción de Qt) en vez de `QMessageBox.
 question(..., StandardButton.Yes | StandardButton.No)`. Test nuevo en
 `tests/test_main_window.py`:
 `test_cerrar_con_la_cruz_usa_botones_en_espanol_no_yes_no`.
+
+## General: "cada tanto se distorsiona la pantalla" — sin patrón identificable, no se tocó código
+
+Pedido/comentario de la clienta: "Cada tanto es como que se distorsiona
+la pantalla y hay que tocar maximizar dos veces para que este efecto no
+se dé, si se te ocurre algo... quedo atento a tu comentario." Este bug
+(Windows, nunca reproducible en este sandbox Linux) ya tiene cinco
+rondas de investigación documentadas más arriba ("Ventana principal:
+maximizado se destapa al entrar a la primera solapa") — la última dejó
+el reafirmado doble (restaurar→maximizar, dos veces, diferido con
+`QTimer.singleShot`) disparando SOLO en el primer cambio de solapa real
+de la sesión (`self._recien_ingresado`), con la clienta confirmando en
+su momento que, pasado ese primer cambio, navegar entre distintas
+solapas ya andaba bien (al punto de sacar el mismo reafirmado de F5 por
+pedido explícito, para no repetirlo sin necesidad).
+
+Antes de tocar código, se le preguntó a la clienta con qué parece
+coincidir esta nueva aparición (¿al volver de minimizar/alt-tab?
+¿después de dejarlo abierto mucho tiempo? ¿al cerrar un diálogo?) para
+acotar el disparador real sin arriesgar una reintroducción del parpadeo
+que se sacó a propósito de F5. Respuesta: "No tengo un patrón claro /
+pasa sin más" — sin ningún disparador identificable, no hay forma de
+armar una mitigación dirigida ni de verificar que una nueva no rompa el
+caso ya confirmado como resuelto. Se deja sin tocar código esta ronda;
+si vuelve a pasar, conviene que la clienta anote qué estaba haciendo
+justo antes (qué solapa, si acababa de minimizar/restaurar, cuánto
+tiempo llevaba el sistema abierto) para poder acotarlo en una próxima
+vuelta.
+
+## Redefinición completa de "Saldo actual"/"Saldo anterior" (caso testigo Vanesa Moreno)
+
+Pedido inicial de la clienta, con una base real adjunta para
+investigar (`espacio_ramos.db`):
+
+> "Tengo a la profesional R4 Vanesa Moreno, en noviembre tenía
+> liquidados $130.811, y abono $131.000, por ende les sobran $189 para
+> descontar en la próxima liquidación. Me meto en la ficha de ella y
+> veo que dice 'Saldo de cuenta actual' $0 y 'Saldo cuenta anterior'
+> -$189. Si bien el saldo total es correcto, -$189, no tendría que ser
+> al reves lo de los saldos..?"
+
+Investigado contra una copia de la base real (forense con SQL directo
+sobre `HistorialPagos`/`Profesional`, IdProfesional=4): el -$189 de
+"Saldo cuenta anterior" NO era el saldo anterior real — era el
+resultado de `reconciliar_saldos_cruzados` (mecanismo de una ronda
+previa, pensado para corregir un bug YA resuelto de la cascada de
+pagos) fusionando, en un arranque anterior, un Anterior real de -$396
+con un Actual real de $207 en un solo campo (`IdPago 87`, ajuste
+sintético: "saldo período anterior -396.00 -> -189.00, saldo período
+actual 207.00 -> 0.00"). El combinado de los dos campos (-$189) siempre
+fue correcto — el problema era que la fusión destruía la separación
+entre "lo que se arrastra de antes" y "lo que pasó este período",
+dejando los dos campos leíbles por separado con un significado que ya
+no correspondía a ninguna realidad.
+
+Primera ronda de preguntas a la clienta (con `AskUserQuestion`,
+alcance/opciones) no fue respondida con una opción — la clienta
+redefinió el modelo completo por su cuenta, en dos mensajes:
+
+> "La verdad esto de manejar o ver tres saldos me confunde mucho, me
+> gustaría ver dos saldos nada mas.
+>
+> Saldo anterior = lo que quedó del mes anterior, se puede modificar
+> desde el período actual si se hace un proceso que afecte al período
+> anterior u horas aisladas
+>
+> Saldo actual = Saldo anterior + importe liquidado mes en curso (con
+> todo lo que se vaya agregando a la imputación de este período
+> actual) - pagos imputados al mes en curso
+>
+> El saldo actual es el resultado en vivo de como está la cuenta del
+> profesional para mi."
+
+Y, sobre el alcance de pantallas afectadas (segunda pregunta): el
+campo "Saldo cuenta actual" de Profesionales edita el COMBINADO ya
+armado (no el bucket crudo por separado), y los mensajes de WhatsApp
+quedan "igual que ahora" (se profundiza más abajo qué significa eso
+mensaje por mensaje). Mientras se estaba implementando llegó un
+mensaje nuevo con seis puntos más, tratados como la especificación más
+actual y autoritativa:
+
+> "1) En solapa 'Registrar pagos' quiero que estas tres columnas se
+> comporten asi: 'Monto': es el valor del pago o del movimiento que
+> está haciendo. 'Saldo previo': es el saldo actual de la cuenta antes
+> de ese pago. 'Nuevo saldo': Es el saldo actual de la cuenta con ese
+> pago o movimiento contemplado.
+>
+> 2) Misma lógica que el punto 1). Reacomodame las columnas de paso,
+> que 'Saldo previo' y 'Nuevo saldo' estén a continuación de 'Monto'
+>
+> 3) Eliminá la etiqueta informativa 'Saldo total', ese monto queda en
+> lo que dice 'Saldo actual'. Dejá los campos hablitados para hacer
+> ajustes manuales si es necesario, si lo quiero hacer que salga una
+> alarta informando que eso puede afectar a la liquidación del
+> profesional, y si le doy ok que cambie lo que tenga que cambiar.
+>
+> 4) En la grilla de mensajeria, por el caso testigo de Vanesa Moreno,
+> Saldo anterior tendría que decir -$396 en lugar de -$189 como dice
+> ahora; el saldo actual está bien, dice -$189
+>
+> 5) Si, tocá lo necesario en los mensajes para que reflejen los dos
+> saldos que pienso manejar, el anterior y el actual.
+>
+> 6) Entiendo que es correcto"
+
+El punto 4 confirma que `reconciliar_saldos_cruzados` quedó mal y hay
+que REVERTIRLA, tanto hacia adelante como para los datos ya afectados:
+Vanesa Moreno es el caso testigo aceptado — después del cambio, Saldo
+anterior tiene que leer -$396 (no -$189) y Saldo actual combinado tiene
+que seguir en -$189 (no cambia, era el único número ya correcto).
+
+### Núcleo: `_aplicar_pago` sin cascada, migración que revierte la reconciliación, `saldo_actual_mostrado` combinado
+
+`Profesional.SaldoCuentaAnterior` sigue siendo exactamente lo que era:
+un campo propio, "lo que quedó del mes anterior", que solo cambia por
+un pago/cargo imputado a un período anterior o por `avance_mes.py` al
+rotar de mes. `Profesional.SaldoCuentaActual` sigue siendo el bucket
+que acredita la liquidación del mes (R) o un pago/cargo imputado al
+mes en curso — pero deja de ser lo que se MUESTRA como "Saldo actual"
+en cualquier pantalla: ese nombre pasa a significar siempre el
+COMBINADO (Anterior + ese bucket), "el resultado en vivo de cómo está
+la cuenta del profesional", en toda pantalla/mensaje del sistema.
+
+- `app/negocio/pagos.py`: `_aplicar_pago_con_cascada` se renombra
+  `_aplicar_pago` y pierde toda la lógica de redistribución — aplica
+  `monto` a UN SOLO campo (el que decide `_campo_saldo` según
+  `periodo_imputado`, sin cambios) y devuelve `(impacto_anterior,
+  impacto_actual)` con uno de los dos siempre en 0.0. Ya no hace falta
+  la cascada: un crédito en el campo imputado que cubre de más ya se ve
+  reflejado en el combinado sin tener que mezclar los dos campos
+  guardados — mezclarlos, al revés, es justo el bug que motivó esta
+  ronda. `registrar_pago`/`modificar_pago` pasan a llamar
+  `_aplicar_pago`; el "Saldo antes/después del pago" (`SaldoAnterior`/
+  `SaldoNuevo` de `HistorialPagos`) sigue siendo el combinado de los
+  dos campos (eso no cambió, ya era así de una ronda anterior) y sigue
+  cambiando en exactamente `monto` sin importar a qué campo se aplicó.
+  La función `reconciliar_saldos_cruzados` se ELIMINA del archivo
+  (ya no hace falta generar ningún ajuste sintético nuevo).
+- `app/db/init_db.py`: se saca el `import`/llamada a
+  `reconciliar_saldos_cruzados` (corría una vez por arranque).
+- `app/db/migraciones.py`: `_revertir_correccion_saldos_cruzados`
+  (nueva, llamada al final de `aplicar_migraciones`) busca en
+  `HistorialPagos` cualquier fila `EsAjuste=1` con `Observacion` que
+  arranque "Corrección automática de saldos cruzados" (la firma exacta
+  que dejaba `reconciliar_saldos_cruzados`), le aplica a `Profesional`
+  el delta OPUESTO al que guardó en `ImpactoSaldoAnterior`/
+  `ImpactoSaldoActual` y borra la fila (era un movimiento sintético,
+  `Monto=0`, sin plata real detrás). Corre en cada arranque — para una
+  base ya revertida, no vuelve a encontrar ninguna fila y no hace nada
+  (idempotente). Verificado contra una copia fresca de la base real
+  adjuntada: antes de revertir, Vanesa Moreno (IdProfesional 4) tenía
+  Anterior=-189/Actual=0 con el ajuste sintético en `HistorialPagos`;
+  después de `init_database` (que aplica la migración), Anterior=-396/
+  Actual=207, el ajuste sintético desaparece, y
+  `saldo_actual_mostrado(conn, fila)` da -189 — EXACTAMENTE el caso
+  testigo que pidió confirmar la clienta.
+- `app/gui/widgets/resumen_saldo.py`: `saldo_actual_mostrado` pasa a
+  devolver `SaldoCuentaAnterior + bucket` para TODAS las categorías
+  (antes devolvía el bucket solo, con el caso especial de A ya
+  resuelto en una ronda anterior). `partes_resumen`/`texto_resumen`
+  (Cargos especiales, y cualquier otra pantalla que los use) ya
+  llamaban a este helper para "Saldo actual" — quedan corregidos
+  de rebote, sin tocarlos.
+
+### Registrar pagos: "Saldo previo"/"Nuevo saldo" ya combinados, sin "Saldo total"
+
+El formulario de carga (`_actualizar_saldos`, `app/gui/pantallas/
+pagos.py`) pasa a mostrar solo DOS saldos (pedido explícito de la
+clienta): "Saldo anterior" (campo crudo) y "Saldo actual" (combinado,
+vía `saldo_actual_mostrado`) — se saca la etiqueta "Saldo total" de una
+ronda anterior (quedaba redundante, ya lo muestra "Saldo actual") y
+"Nuevo saldo" se calcula sumándole el monto cargado directamente a
+"Saldo actual", sin ningún total intermedio. El orden/ancho de columnas
+de la tabla de movimientos ("Saldo previo"/"Nuevo saldo" justo después
+de "Monto") ya estaba resuelto de una ronda anterior (#79/#82) — nada
+que tocar ahí, y esas dos columnas YA guardaban el combinado (ver
+`registrar_pago`), así que ya cumplían el punto 1 del pedido sin
+cambiar nada.
+
+### Estado de cuenta (Liquidación mensual): agrega "Saldo anterior" al lado de "Saldo actual"
+
+`_PanelEstadoCuentaLiquidaciones` (`app/gui/pantallas/liquidacion.py`)
+mostraba solo "Saldo actual" (el bucket crudo, sin "Saldo anterior") —
+se agrega un segundo campo de solo lectura "Saldo anterior" (campo
+crudo) al lado, y "Saldo actual" pasa a leer el combinado vía
+`saldo_actual_mostrado` en vez de `SaldoCuentaActual` directo.
+
+### Profesionales: "Saldo cuenta actual" edita el combinado, alerta antes de un ajuste manual
+
+Pedido explícito de la clienta: el campo "Saldo cuenta actual" del
+diálogo Nuevo/Editar pasa a MOSTRAR/EDITAR el combinado (no el bucket
+crudo) — se saca la fila de solo lectura "Saldo total" de una ronda
+anterior (#75, ya redundante). `_al_abrir_dialogo` (`app/gui/pantallas/
+profesionales.py`) reemplaza, apenas se abre el diálogo, el valor
+precargado del campo (el bucket crudo, cargado por el mecanismo
+genérico de `crud_generico.Campo`) por `bucket + anterior`.
+`_al_guardar_profesional` hace la cuenta inversa antes de guardar
+(`nuevo_bucket = combinado_ingresado - anterior_ingresado`) para volver
+a persistir el bucket real en `SaldoCuentaActual` — "Saldo cuenta
+anterior" nunca cambió de significado, sigue siendo el campo crudo.
+
+Si el bucket resultante o el anterior cambiaron respecto a lo que el
+profesional ya tenía guardado (un ajuste manual real, no solo abrir y
+cerrar el diálogo sin tocar nada), se pregunta con un `QMessageBox.
+question` si confirma el ajuste ("esto puede afectar su liquidación") —
+al rechazar, no se guarda nada (`al_guardar` devuelve `None`, mismo
+mecanismo que ya usan los dos guardarraíles de categoría de esta
+misma función); al confirmar, se guarda el valor nuevo normalmente.
+Solo se pregunta al EDITAR un profesional ya existente (`registro is
+not None`) — un alta nueva no tiene ninguna liquidación que pueda verse
+afectada.
+
+### Centro de mensajería / Mensajes al profesional: mismo combinado en todos lados
+
+`_PanelCentroMensajeria.actualizar()` (`app/gui/pantallas/
+mensajeria.py`) ya calculaba "Saldo actual" a mano con la fórmula
+correcta (`saldo_anterior + bucket` para R, `saldo_actual_aislada` para
+A) — se simplifica para llamar al mismo `saldo_actual_mostrado`
+compartido en vez de duplicar la cuenta (sin cambio de comportamiento,
+solo DRY). `mensaje_recordatorio_fin_de_mes` (`app/negocio/
+mensajes.py`, "ESTADO DE CUENTA ACTUAL") leía `SaldoCuentaActual` solo
+— pasa a sumarle `SaldoCuentaAnterior` (esta función ya está acotada a
+categoría R vía `_profesional_r`, así que no hace falta el caso
+especial de A ni importar nada de `app.gui` desde la capa de negocio).
+`mensaje_situacion_1`/`_3`/`_5` y `mensaje_recordatorio_deuda_
+profesional_x` (que usan `SaldoCuentaAnterior` solo, para recordatorios
+de deuda VIEJA) se confirman sin cambios — son, por diseño, el otro
+saldo que la clienta pidió seguir viendo por separado.
+
+### Tests y verificación
+
+`tests/test_pagos.py`: la sección de cascada se reemplaza por una de
+"un solo campo por pago (sin cascada)" — mismos escenarios reales
+(pago que cubre de más el período imputado, que cae corto, cargo
+positivo con el otro campo en crédito, eliminar/modificar) pero
+confirmando que el OTRO campo nunca se toca. La sección completa de
+`reconciliar_saldos_cruzados` (7 tests) se elimina. `tests/test_
+migraciones.py` (+3): revierte un ajuste sintético ya generado
+(reproduce el caso Vanesa Moreno con sus montos reales), idempotente
+en la segunda vuelta, no toca un ajuste manual cualquiera que no tenga
+la `Observacion` exacta de la reconciliación retirada. `tests/test_gui_
+widget_resumen_saldo.py` (+2): `saldo_actual_mostrado` combina para R
+y para A (con la aislada en vivo). `tests/test_gui_pagos.py`: los tres
+tests de "Saldo período anterior/actual" pasan a "Saldo anterior/
+actual" sin "Saldo total"; el test de Eliminar con impacto repartido
+entre los dos campos se adapta a simular una fila VIEJA (anterior a
+este cambio, con el impacto ya repartido a mano) en vez de reproducirla
+con un pago nuevo (que ya no puede repartirse). `tests/test_gui_
+novedades.py`/`tests/test_gui_liquidacion.py`: ajustados los valores
+esperados de "Saldo actual" al combinado. `tests/test_profesionales.py`
+(+6): el diálogo muestra el combinado sin "Saldo total", un alta nueva
+arranca en $0, `_al_guardar_profesional` vuelve al bucket real sin
+preguntar nada si no hay cambio real, pregunta y cancela si se
+rechaza, pregunta y guarda bien si se confirma, también pregunta si
+solo cambia el anterior. `tests/test_mensajes.py` (+1): el recordatorio
+de fin de mes combina anterior y actual.
+
+Suite completa tras esta ronda: pyflakes limpio en los nueve archivos
+de `app/` tocados (`app/db/init_db.py`, `app/db/migraciones.py`,
+`app/gui/pantallas/liquidacion.py`, `app/gui/pantallas/mensajeria.py`,
+`app/gui/pantallas/pagos.py`, `app/gui/pantallas/profesionales.py`,
+`app/gui/widgets/resumen_saldo.py`, `app/negocio/mensajes.py`,
+`app/negocio/pagos.py`) y los nueve de test tocados.
+
+## Saldo actual de categoría A: el diálogo de Profesionales y el historial de pagos no usaban el cálculo en vivo
+
+Bug real reportado por la clienta, ronda siguiente a la redefinición de
+saldos de más arriba (caso testigo A19 Marcela La Regina):
+
+> "A19- Marcela La Regina : Figura en profesionales $147.686 como
+> saldo actual; en la grilla de mensajería $163.540. De los dos
+> valores el correcto es el último. En la tabla de pagos también
+> tendría que actualizar la información, pero ante todo repasame la
+> lógica por favor."
+
+Investigado antes de tocar nada: para categoría A nada acredita nunca
+el bucket crudo `Profesional.SaldoCuentaActual` (no hay liquidación
+mensual propia) — por eso ese número se calcula EN VIVO
+(`movimiento_periodo_aislada`: reservas aisladas + llaves + ítems
+libres − pagos del período). `saldo_actual_mostrado` (la función
+compartida que ya usan Centro de mensajería/Pagos/Estado de cuenta/
+Cargos especiales) ya resolvía esto bien desde la ronda anterior. Pero
+quedaron DOS lugares con la fórmula vieja (suma cruda de los dos
+campos persistidos, sin el caso especial de A):
+
+1. El diálogo Nuevo/Editar de Profesionales (`_al_abrir_dialogo`,
+   sumado en la ronda anterior) calculaba el combinado a mostrar/editar
+   leyendo los dos campos de texto ya precargados, en vez de llamar a
+   `saldo_actual_mostrado` — para un R da lo mismo (el bucket crudo YA
+   es el valor real), para un A da el bucket crudo obsoleto (normalmente
+   $0 o un valor viejo) en vez del cálculo en vivo.
+2. `registrar_pago`/`modificar_pago` (`app/negocio/pagos.py`) calculaban
+   el snapshot "Saldo antes del pago"/"Saldo después del pago" que
+   queda guardado en `HistorialPagos` con la misma suma cruda —
+   cualquier pago histórico de un profesional A tiene esos dos valores
+   mal, el pedido de "en la tabla de pagos también tendría que
+   actualizar la información".
+
+### `saldo_actual_mostrado` se muda a la capa de negocio
+
+La función vivía en `app/gui/widgets/resumen_saldo.py` (un módulo de
+GUI) a pesar de ser lógica de negocio pura, sin ningún uso de Qt —
+quedó mal ubicada ahí desde que se creó. `app/negocio/pagos.py`
+necesita poder llamarla (para el fix de `registrar_pago`/
+`modificar_pago`) y esa capa de negocio no puede depender de la GUI, así
+que se mudó la función a `app/negocio/pagos.py` (justo debajo de
+`_aplicar_pago`, con el mismo docstring) — `app/gui/widgets/
+resumen_saldo.py` la reexporta (`from app.negocio.pagos import
+saldo_actual_mostrado`) para no tener que tocar ningún llamador de
+pantallas (Centro de mensajería, Estado de cuenta de Liquidación
+mensual, Registrar pagos, Cargos especiales ya la importaban desde ahí).
+
+### `registrar_pago`/`modificar_pago`: `saldo_previo`/`nuevo_saldo` sin re-consultar el cálculo en vivo
+
+Sustituir la suma cruda por `saldo_actual_mostrado(conn, profesional)`
+en el punto donde ya se calculaba `saldo_previo` resuelve el caso de
+`registrar_pago` directo — pero NO alcanza con volver a llamar a
+`saldo_actual_mostrado` después de aplicar el pago para obtener
+`nuevo_saldo`: para un A, `movimiento_periodo_aislada` suma los pagos
+ya imputados a ese período consultando `HistorialPagos` directo, y el
+pago que se está registrando/modificando todavía no está insertado (o
+todavía tiene su Monto VIEJO) en ese momento — una segunda consulta
+daría un valor viejo, no el real. Se usa en cambio la identidad
+matemática ya confirmada por los tests existentes ("el combinado
+cambia en exactamente el monto del pago, sin importar a qué campo se
+aplique"): `nuevo_saldo = saldo_previo + monto` directo, sin volver a
+calcular nada — funciona igual para todas las categorías y de paso
+elimina una consulta redundante a `Profesional` que ya no hacía falta.
+
+En `modificar_pago` hace falta un paso extra: revertir el impacto en
+los campos crudos (ya existía) NO alcanza para que "Saldo antes de
+este pago" excluya la versión VIEJA del pago que se está modificando,
+porque para un A esa fila SIGUE en `HistorialPagos` con su Monto viejo
+hasta el `repo.actualizar` final de la función — el cálculo en vivo la
+sigue contando. Se la pone en `Monto=0` momentáneamente antes de
+calcular `saldo_previo` (el `repo.actualizar` final la deja con el
+Monto real de todas formas, así que no hace falta revertir este paso
+aparte). Sin este paso, "Saldo antes de este pago" de un A quedaría
+contando la versión vieja del propio pago que se está corrigiendo.
+
+### Profesionales: mismo fix en el diálogo, con un cuidado extra al comparar para la alerta de ajuste manual
+
+`_al_abrir_dialogo` pasa a llamar `saldo_actual_mostrado(conn, dialogo.
+registro)` en vez de sumar a mano los dos campos de texto ya
+precargados — `_DialogoRegistro` (`app/gui/crud_generico.py`) suma el
+atributo `self.registro` (el registro con el que se abrió, `None` en
+un alta nueva) para que `al_abrir_dialogo` pueda acceder al registro
+completo, no solo a los campos propios del diálogo.
+
+`_al_guardar_profesional` también necesitaba un ajuste, no solo
+cambiar qué función llama: la comparación "¿hubo un ajuste manual
+real?" (para decidir si preguntar y si hay que pisar el bucket crudo)
+NO puede hacerse comparando el bucket DERIVADO (combinado ingresado
+menos anterior) contra el bucket crudo ya guardado — para un A esos dos
+números son casi siempre distintos aunque no se haya tocado nada
+(el bucket crudo guardado no significa nada para un A, el real es el
+cálculo en vivo), lo que disparaba la alerta en falso y pisaba el
+bucket crudo con el valor en vivo con solo abrir y guardar el diálogo
+sin cambiar nada. La comparación correcta es "combinado que se mostró
+al abrir vs. combinado que quedó al guardar" (recalculando
+`saldo_actual_mostrado(conn, registro)` fresco adentro de
+`_al_guardar_profesional`, no reutilizando nada del diálogo) — si no
+cambió, se conserva el bucket crudo tal cual estaba, sin pisarlo.
+
+Tests nuevos: `tests/test_pagos.py` (+2:
+`test_registrar_pago_de_un_a_usa_el_calculo_en_vivo_no_el_bucket_
+crudo`, `test_modificar_pago_de_un_a_usa_el_calculo_en_vivo_no_el_
+bucket_crudo` — reproducen el caso real con los montos de Marcela La
+Regina). `tests/test_profesionales.py` (+2:
+`test_dialogo_saldo_actual_de_un_a_muestra_el_calculo_en_vivo_no_el_
+bucket_crudo`, `test_al_guardar_un_a_sin_tocar_nada_no_pregunta_ni_
+pisa_el_bucket_crudo`). pyflakes limpio en `app/negocio/pagos.py`,
+`app/gui/widgets/resumen_saldo.py`, `app/gui/pantallas/profesionales.py`,
+`app/gui/crud_generico.py` y los dos archivos de test tocados.
+
+## General: F5 vuelve a reafirmar el maximizado dos veces, en toda pantalla
+
+Pedido explícito de la clienta, sobre una decisión de una ronda
+anterior (#56, "F5 ya no simula doble maximizar" — ahí la clienta
+había pedido sacarlo porque no hacía falta repetirlo sin necesidad):
+
+> "General: Quiero que al presionar F5 en todas las pantallas aparte
+> de sus comportamientos propios me haga el efecto de presionar
+> maximizar dos veces para que la visualización se acomode."
+
+`_reiniciar_solapa_activa` (`app/gui/main_window.py`, el método detrás
+de F5/"Refrescar") suma `self._reafirmar_maximizado(veces=2)` al final,
+DESPUÉS de llamar `panel.reiniciar()` si el panel activo lo tiene — el
+mismo mecanismo ya existente (`_reafirmar_maximizado`, usado hasta
+ahora solo al entrar al sistema vía `_recien_ingresado`/
+`_cambiar_seccion`): restaurar y volver a maximizar, dos veces
+seguidas, cada paso diferido con `QTimer.singleShot(0, ...)`. No hace
+nada si la ventana no está maximizada (no hay geometría que
+reafirmar) — "aparte de sus comportamientos propios" se cumple porque
+se suma al refresco de cada panel, no lo reemplaza.
+
+Test reemplazado en `tests/test_main_window.py`:
+`test_f5_ya_no_reafirma_el_maximizado` → `test_f5_tambien_reafirma_el_
+maximizado_dos_veces` (confirma las 4 llamadas esperadas: normal,
+maximizar, normal, maximizar). Tests nuevos: `test_f5_no_reafirma_el_
+maximizado_si_la_ventana_no_esta_maximizada`, `test_f5_reafirma_el_
+maximizado_ademas_del_reiniciar_propio_del_panel` (confirma que
+conviven el refresco propio del panel Y el reafirmado, no que uno pisa
+al otro). pyflakes limpio en `main_window.py`. Suite de `tests/test_
+main_window.py`: 51 passed.

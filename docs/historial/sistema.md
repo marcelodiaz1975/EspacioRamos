@@ -1972,3 +1972,828 @@ profesional, una en fecha de feriado y otra no, verificando que cada
 una cae en la línea correcta). pyflakes limpio en los dos archivos de
 negocio/GUI y los dos de test tocados; suites `test_panel_control.py`
 (35 passed) y `test_gui_panel_control.py` (66 passed) sin regresiones.
+
+## Panel de control: subtítulos y subtotales en negrita, sin itálica ni subrayado
+
+Pedido explícito de la clienta sobre el cuadro largo "Estadísticas
+principales mes en curso": "sacá la itálica de los subtítulos y los
+subtotales del cuadro largo, sacá los subrayados también, que tanto
+los subtítulos estén en negrita y los subtotales con los importes
+también" — tercera vuelta de estilo de este mismo elemento (itálica
++subrayado → itálica sin subrayar en los totales → esta ronda, negrita
+a secas en los dos). `_subtitulo_italica` se renombra `_subtitulo_
+negrita` (`app/gui/pantallas/panel_control.py`, `font-weight: bold;`
+en vez de itálica+subrayado) y los tres `etiqueta_total_liquidado`/
+`etiqueta_balance_negocio`/`etiqueta_monto_restante_a_cobrar` pasan de
+`"font-style: italic;"` a `"font-weight: bold;"`. Tests reescritos:
+`test_tarjeta_estadisticas_principales_tres_subtitulos_en_negrita_y_en_
+orden`, `test_tarjeta_estadisticas_principales_los_tres_totales_van_en_
+negrita`.
+
+## Panel de control: separar visualmente las tres cuentas de "Estadísticas principales mes en curso"
+
+Pedido explícito de la clienta: "El fondo del contenido de todo el
+recuadro de 'Estadísticas principales mes en curso' es todo gris,
+separame las tres cuentas con un espacio en blanco finito aunque sea,
+como el fondo del título del cuadro, como para que visualmente las
+tres secciones dentro del cuadro queden diferenciadas." Investigado
+antes de tocar nada: el cuadrito (`QFrame#cuadritoInfo`, `_tarjeta` en
+`app/gui/pantallas/panel_control.py`) nunca tuvo un `background-color`
+propio — solo el borde — así que tanto el título como el contenido de
+abajo caían al gris default de Qt por igual (confirmado armando la
+pantalla real offscreen y muestreando píxeles: título y contenido daban
+el mismo `#efefef`, ningún color "blanco" preexistente en ningún lado
+de este cuadrito en particular).
+
+Cada una de las tres cuentas ("Liquidaciones mes en curso"/"Resultado
+del negocio"/"Monto a cobrar en el mes en curso") pasa a envolverse en
+su propio widget con objectName nuevo `seccionEstadisticas`
+(`_seccion_estadisticas()`, nueva en `panel_control.py`), con fondo
+blanco (`t['superficie']`, misma regla QSS que ya usa `QWidget#
+panelSolapa` — sumada en `app/gui/estilos.py`) y un margen propio
+(`setContentsMargins(6, 6, 6, 6)`). El `addSpacing(12)` que ya separaba
+una cuenta de la siguiente queda igual (sigue siendo del mismo gris que
+el resto del contenido escrolable, sin pintar nada) — pero ahora, al
+estar entre dos secciones blancas, se ve como el "espacio en blanco
+finito" pedido: tres cuadros blancos recortados contra el gris de
+fondo, en vez de un bloque gris liso sin ninguna separación. Nada de
+esto toca los otros cinco cuadritos del panel (`cuadritoInfo` en sí no
+cambió, el objectName nuevo es exclusivo de estas tres secciones).
+
+Tests actualizados en `tests/test_gui_panel_control.py`: los dos que
+asumían que las seis etiquetas vivían directo en un único `contenido`
+compartido (`test_tarjeta_estadisticas_principales_linea_en_blanco_
+antes_del_primer_subtitulo`/`test_tarjeta_estadisticas_principales_
+orden_de_las_tres_secciones`) se reescriben para subir un nivel más
+(`_contenido_estadisticas`, nuevo helper de test) y, en el segundo,
+chequear el orden de las TRES secciones entre sí además del orden
+detalle→total DENTRO de cada una. Test nuevo:
+`test_tarjeta_estadisticas_principales_las_tres_secciones_tienen_
+fondo_blanco`. Verificado armando la pantalla real offscreen y
+comparando colores de píxeles antes/después (ver captura enviada:
+las tres cuentas en blanco, separadas por el gris del cuadrito).
+pyflakes limpio en `panel_control.py`/`estilos.py`/el archivo de test.
+
+## Panel de control: sacar la línea en blanco inicial e invertir el esquema de color de "Estadísticas principales"
+
+Pedido explícito de la clienta, ronda siguiente a la de "separar
+visualmente las tres secciones": "eliminá esa línea en blanco inicial
+arriba de 'Liquidaciones mes en curso', luego invertí los colores de
+fondo, todo lo que son las cuentas tiene que estar en gris, y las
+líneas intermedias en blanco, o sea al revés que ahora." Investigado
+antes de tocar nada (armando la pantalla real offscreen y muestreando
+píxeles): el cuadrito (`QFrame#cuadritoInfo`) nunca tuvo un
+`background-color` propio — título y contenido caían los dos al mismo
+gris default de Qt (`#efefef`), así que "el fondo del título" de la
+ronda anterior no era, en rigor, un blanco ya existente — era solo la
+referencia de diseño general del sistema.
+
+`_seccion_estadisticas()` (envuelve cada una de las tres cuentas) pierde
+su objectName/fondo blanco — vuelve a ser un `QWidget` liso, que
+muestra el gris del cuadrito por detrás, igual que el resto del
+contenido. El objectName blanco (`t['superficie']`) se muda al
+separador INTERMEDIO: `_separador_estadisticas()`, nueva función,
+`QWidget` de alto fijo (12px) con objectName `separadorEstadisticas`
+(`estilos.py` sube la regla, reemplazando a la vieja `#seccionEstadisticas`)
+— se agrega entre cuenta 1→2 y cuenta 2→3 (dos en total), nunca antes
+de la primera ni después de la última. El `addSpacing(12)` que
+separaba la primera cuenta del título del cuadrito se saca directo, sin
+reemplazo — confirmado offscreen que, de paso, esto saca también el
+scroll vertical de más que aparecía en el cuadrito (ya no hay contenido
+de sobra para el alto disponible).
+
+Tests en `tests/test_gui_panel_control.py`: los dos que asumían fondo
+blanco en las cuentas se reescriben (`test_tarjeta_estadisticas_
+principales_las_tres_cuentas_sin_fondo_propio` confirma objectName
+vacío, `test_tarjeta_estadisticas_principales_los_separadores_
+intermedios_tienen_fondo_blanco` confirma exactamente dos widgets
+`separadorEstadisticas`); el de la línea en blanco inicial se invierte
+(`test_tarjeta_estadisticas_principales_sin_linea_en_blanco_antes_del_
+primer_subtitulo`, ahora exige que el primer ítem con widget sea el
+índice 0). pyflakes limpio en `panel_control.py`/`estilos.py`/el
+archivo de test. Suite conjunta de `test_gui_panel_control.py`/`test_
+panel_control.py`: 105 passed.
+
+## Panel de control: refrescar cumpleaños/fechas especiales contra la fecha real, no la del día que se abrió la app
+
+Pedido explícito de la clienta: "Noto que si dejo el sistema abierto de
+un día para otro la info que muestra en esa pantalla queda anclada al
+día que se abrió, por ejemplo me sigue marcando en rojo cumpleaños de
+personas de hace dos días, si se puede que con cada proceso que
+refresque el contenido de esa pantalla de acuerdo al día real de la
+fecha." Investigado antes de tocar nada: `fecha_real`/`cumpleanos_y_
+dias_profesion_proximos` (`app/negocio/dias.py`/`app/negocio/panel_
+control.py`) ya recalculan `date.today()` en vivo cada vez que se
+llaman — no había ningún valor cacheado ahí. El problema real es que
+nada volvía a llamar a `actualizar()` (el método que arma TODO el
+contenido de la solapa, incluido el resaltado en rojo de "hoy" en
+Cumpleaños/Fechas especiales) con solo el paso del tiempo: solo corría
+al construir la pantalla, al volver a entrar a la solapa (`showEvent`)
+o con F5 — dejando el sistema abierto en esa misma solapa de un día
+para el otro, sin tocar nada, nunca lo volvía a llamar.
+
+El timer del reloj en vivo (`self._timer_reloj`, ya corría cada
+segundo para `_actualizar_reloj`, que solo tocaba `etiqueta_reloj`)
+pasa a comparar la fecha real contra `self._fecha_ultima_
+actualizacion` (nueva, guardada al construir la pantalla) y, si cambió
+(cruzó la medianoche), dispara `self.actualizar()` completo una sola
+vez — no hace falta recalcular todo cada segundo, solo el día en que
+efectivamente cambia. Tests nuevos en `tests/test_gui_panel_control.py`
+(mockean `datetime.now`, mismo criterio que el test ya existente del
+reloj): `test_actualizar_reloj_dispara_actualizar_completo_al_cruzar_
+la_medianoche`, `test_actualizar_reloj_no_dispara_actualizar_completo_
+en_el_mismo_dia`; el test preexistente del reloj se actualiza para la
+llamada extra a `datetime.now()` que suma `_fecha_ultima_
+actualizacion` en el constructor.
+
+## Panel de control: fusionar título e importe en "Estadísticas principales", sacar líneas divisorias
+
+Pedido explícito de la clienta, tercera ronda de rediseño de este
+cuadro: "En el cuadro de 'Estadísticas principales mes en curso' en las
+tres secciones elimina la linea divisoria y el título de cada
+subtotal. El importe quiero que aparezca dentro de cada título. Por
+ejemplo, 'Liquidaciones mes en curso: $ 14.341.476,00'. El primer
+título que quede 'Total liquidado mes en curso: $ 0.000.000,00'. El
+segundo título que quede 'Balance del negocio: $ 0.000.000,00'. El
+tercer título que quede 'Saldo a cobrar del mes en curso: $
+0.000.000,00'. Los de abajo de los títulos no cambian, solo se
+suprimen las lineas divisorias y los importes se reubican junto al
+título."
+
+`_armar_tarjeta_estadisticas_principales` (`app/gui/pantallas/
+panel_control.py`): cada una de las tres secciones pasa a armar
+PRIMERO su propia etiqueta en negrita (`self.etiqueta_total_liquidado`/
+`etiqueta_balance_negocio`/`etiqueta_monto_restante_a_cobrar`, ya
+existían) con el texto COMBINADO "Título: $ importe" — sin el
+`_subtitulo_negrita(...)` suelto de antes ni el `_linea_divisoria()`
+que separaba el subtítulo del detalle. Lo de abajo de cada título
+(detalle por localidad/edificio, igual que siempre) no se tocó.
+`actualizar()` arma ese texto combinado en cada refresco; la tercera
+etiqueta cambia de nombre de cara al usuario ("Monto restante del mes
+a cobrar" -> "Saldo a cobrar del mes en curso", pedido explícito de
+este mismo mensaje) sin cambiar el atributo Python
+(`etiqueta_monto_restante_a_cobrar`, para no tocar el resto del código
+que ya lo usaba). `_subtitulo_negrita` (la función que armaba el
+subtítulo suelto) se elimina del archivo — confirmado sin otro uso.
+
+Tests en `tests/test_gui_panel_control.py`:
+`test_tarjeta_estadisticas_principales_muestra_las_lineas_de_las_tres_
+secciones` actualizado al nuevo texto "Saldo a cobrar del mes en
+curso:". `test_tarjeta_estadisticas_principales_tres_subtitulos_en_
+negrita_y_en_orden` renombrado a `...tres_titulos_combinados_en_
+negrita_y_en_orden`, ahora chequea que las tres etiquetas (título+
+importe) tengan `font-weight: bold;` y que el texto antes de ":" sea
+"Total liquidado mes en curso"/"Balance del negocio"/"Saldo a cobrar
+del mes en curso" en ese orden. `test_tarjeta_estadisticas_principales_
+orden_de_las_tres_secciones` se invierte (ahora el título va ANTES del
+detalle, no después). pyflakes limpio en `panel_control.py`. Suite
+conjunta de `test_gui_panel_control.py`/`test_panel_control.py`: 105
+passed.
+
+## F2: planilla flotante en vez de la calculadora
+
+Pedido explícito de la clienta, en un mismo mensaje junto con otros dos
+pedidos sobre Registrar pagos y Mensajes predefinidos (ver
+`docs/historial/pagos.md` y `docs/historial/grilla_mensajeria.md` para
+esos dos): "F2 Calculadora * Quería saber si en vez de la calculadora
+al presionar esa tecla me podría cargar una especie de planilla de
+Excel flotante, para hacer anotaciones, cálculos, etc. * Si se puede,
+esas anotaciones quiero que se guarde permanentemente, que las pueda
+borrar cuando yo quiera, no cuando se cierra el sistema y se vuelve a
+entrar se blanquea todo, quiero que se conserven * Es para anotaciones
+simples y cálculos simples, temporales, como para tener a mano cada
+tanto." Sobre el motor de fórmulas, la clienta aclaró: "fórmulas tipo
+excel, funciones básicas de operaciones aritméticas... no fórmulas
+complejas... negrita[,] el color de la fuente... algún color de
+relleno en las celdas... formato de números de dos decimales y
+separador de miles."
+
+`PlanillaFlotante` (`app/gui/widgets/planilla_flotante.py`, motor en
+`app/negocio/planilla_flotante.py`) reemplaza por completo a la vieja
+`Calculadora` (eliminada, junto con su test). Grilla tipo Excel (12
+columnas A-L × 40 filas) con barra de fórmula arriba (no se edita
+directo en la celda, todo pasa por ahí, igual que Excel) — fórmulas
+con "=" (ej. "=A1+B2*3": +-*/, paréntesis, referencias a otras celdas,
+sin funciones — "no fórmulas complejas"), detección de referencia
+circular, celdas sin "=" nunca se calculan aunque el texto parezca una
+cuenta (para poder anotar texto/números sueltos libremente). Formato
+por celda: negrita, color de texto, color de relleno (vía
+`QColorDialog`), "Formato número" (dos decimales + separador de miles,
+`formatear_miles`, mismo esquema punto-de-miles/coma-decimal que
+`formatear_moneda` sin el "$"). Delete/Backspace borra el contenido de
+la selección sin tocar el formato. Botón "Vaciar todo" (con
+confirmación) borra contenido Y formato de toda la planilla de una.
+
+Persistencia permanente a pedido explícito ("no quiero que se
+blanquee al cerrar el sistema, quiero que se conserven"): tabla nueva
+`CeldaPlanilla` (`IdCelda` tipo "A1" como PK, `Contenido`, `Negrita`,
+`ColorTexto`, `ColorFondo`, `FormatoNumero`) — una fila por celda con
+algo propio, sin fila = celda vacía sin estilo (mismo criterio sparse
+que `PlantillaTexto`).
+
+### Dos bugs reales de PySide6/shiboken (6.12.0, este sandbox) investigados a fondo para poder armar esta pantalla
+
+**Primero** (resuelto de raíz): guardar un `QFont`/`QBrush`/`QColor`
+como rol de un `QTableWidgetItem` (`setFont`/`setForeground`/
+`setBackground`) a partir de unos cientos de celdas, y después tocar
+su texto, abortaba el proceso al cerrar la ventana ("Fatal Python
+error: none_dealloc... bug likely caused by a refcount error in a C
+extension"). Se resolvió sacando todo el estilo del modelo/ítem: un
+`QStyledItemDelegate` propio (`_DelegadoCelda`) calcula negrita/color
+de texto/color de relleno al pintar, leyendo un dict Python común
+(`self._celdas`) — nunca persiste un tipo complejo de Qt como rol.
+
+**Segundo** (mitigado, no eliminable desde el código de la app):
+investigando por qué el abort seguía apareciendo igual, con o sin
+delegate, se confirmó con varios scripts offscreen aislados que el
+bug de fondo es muchísimo más general — aparece con `QTableWidgetItem.
+setText`, con `setData`, y hasta con un `QAbstractTableModel` propio
+sin ningún `QTableWidgetItem` de por medio. El disparador real es un
+conteo TOTAL de mutaciones de texto sobre ítems de tabla dentro del
+mismo proceso — un número fijo y chico (entre ~700 y ~1000,
+confirmado con scripts mínimos de una sola celda), no algo que escale
+con la cantidad de celdas ni con crear/destruir ventanas. Por debajo
+de ese umbral nunca pasa nada (confirmado hasta 500 mutaciones
+sin ningún problema); por encima, el proceso aborta — pero SOLO en el
+garbage collection final de Python al cerrar TODO el programa, nunca
+durante el uso real (confirmado repetidas veces: el script de prueba
+siempre termina su trabajo e imprime su resultado antes de que
+aparezca el abort en el shutdown). Es decir: ningún dato se pierde
+nunca (ya quedó guardado en SQLite en cada edición), lo que podría
+fallar es el cierre prolijo del proceso tras una sesión muy larga de
+uso intensivo de esta pantalla puntual.
+
+Mitigado con dos cambios, que entre los dos dejan el conteo real muy
+por debajo del umbral en el uso típico ("anotaciones simples... cada
+tanto", no una grilla que se recalcula entera en cada tecla):
+
+1. `_recalcular_textos()` solo llama a `item.setText(...)` cuando el
+   texto cambió de verdad (antes re-seteaba las 480 celdas completas
+   en CADA edición, la inmensa mayoría siempre vacías) — en el uso
+   real esto reduce el conteo de mutaciones de cientos por edición a
+   prácticamente una sola.
+2. `PlanillaFlotante` nunca se destruye: `VentanaPrincipal` crea una
+   única instancia la primera vez que se aprieta F2 y la reusa el
+   resto de la sesión, alternando `show()`/`hide()` (`closeEvent`
+   ignora el cierre real y solo esconde) — así nunca hace falta
+   reconstruir la grilla de 480 `QTableWidgetItem` de cero, que por sí
+   sola ya es una buena porción del presupuesto antes de llegar al
+   umbral.
+
+El resto de las pantallas del sistema no tropieza con este bug en el
+uso diario porque ninguna mantiene un ítem de tabla vivo mutando su
+texto cientos de veces en la misma sesión — todas rearman sus
+`QTableWidgetItem` de cero en cada refresco (bastantes menos refrescos
+por sesión que ediciones posibles en una planilla de notas). No se
+encontró ninguna forma de eliminar el bug de fondo desde código de la
+aplicación (se probó, sin éxito: `gc.disable()`, llamar
+`QApplication.processEvents()` seguido, reemplazar `setText` por
+`setData`, reemplazar `QTableWidgetItem` por un `QAbstractTableModel`
+propio) — es un defecto del build de PySide6/shiboken instalado en
+este sandbox (`pip show PySide6` → 6.12.0), no de cómo está armada
+esta pantalla. Mismo criterio que el resto de los "Fallos conocidos
+del sandbox/contenedor" (ver CLAUDE.md): no bloquea cerrar la ronda,
+pero vale la pena confirmar en el entorno real de la clienta (Windows)
+si esta versión puntual de PySide6 también lo tiene, antes de que haga
+un uso muy intensivo y prolongado de esta pantalla en particular.
+
+Tests: `tests/test_planilla_flotante.py` (27, motor de fórmulas y
+persistencia: valores/fórmulas/referencias/ciclos/errores, formato de
+miles, guardar/leer/vaciar). `tests/test_gui_widget_planilla_
+flotante.py` (17, la ventana real: escribir y persistir, fórmulas con
+referencias, notas sueltas no se calculan, confirmar con Enter baja
+una fila, negrita/color de texto/color de relleno/formato número
+sobre una celda y sobre una selección múltiple, Delete/Backspace,
+Vaciar todo con y sin confirmar, recarga desde lo ya guardado al
+construir una instancia nueva, cerrar con la cruz solo esconde). Este
+archivo comparte una ÚNICA instancia de `PlanillaFlotante` entre todos
+sus tests (fixture `_instancia_compartida`, reconectada a la base de
+cada test sin reconstruir la ventana) — mismo criterio que la app
+real, y necesario para no disparar el segundo bug de arriba dentro de
+la propia suite (confirmado: construir una instancia nueva por test,
+~13 veces, ya lo disparaba).
+
+`tests/test_main_window.py`: `test_f2_abre_una_sola_calculadora_y_f2_
+de_nuevo_la_cierra` se reemplaza por `test_f2_abre_la_planilla_y_f2_
+de_nuevo_la_oculta` (misma instancia siempre, `show()`/`hide()` en vez
+de crear/destruir) y se actualiza la leyenda de la barra de estado
+("F2 – Planilla" en vez de "F2 – Calculadora"). `app/gui/widgets/
+calculadora.py` y `tests/test_gui_widget_calculadora.py` se eliminan
+(sin otro uso confirmado con `grep -rln "Calculadora\b" app/ tests/`).
+
+pyflakes limpio en los ocho archivos de `app/` tocados (`app/db/
+schema.sql`, `app/gui/crud_generico.py`, `app/gui/main_window.py`,
+`app/gui/pantallas/pagos.py`, `app/gui/pantallas/textos_sistema.py`,
+`app/gui/widgets/planilla_flotante.py` nuevo, `app/negocio/mensajes.py`,
+`app/negocio/plantillas_texto.py`, `app/negocio/planilla_flotante.py`
+nuevo) y los ocho de test tocados/nuevos.
+
+Suite completa (`pytest tests/`, 3290 tests): 13 failed, 3277 passed —
+los 13 son EXACTAMENTE los ya documentados (ver CLAUDE.md, "Fallos
+conocidos del sandbox/contenedor": los 3 de `test_avance_mes.py`, los
+3 de `test_gui_mensajeria.py` y los 7 de calibración de fuentes),
+ninguno nuevo de esta ronda. Al final de esa corrida, después de
+imprimirse el resumen completo, aparece un crash de memoria del
+proceso ("malloc(): unaligned tcache chunk detected") — confirmado con
+una segunda corrida completa EXCLUYENDO los dos archivos de test
+nuevos de la planilla (`--ignore=tests/test_gui_widget_planilla_
+flotante.py --ignore=tests/test_planilla_flotante.py`) que el mismo
+crash, con los mismos 13 fallos, aparece IGUAL sin esos archivos — así
+que no lo causa esta ronda: es un artefacto preexistente de correr la
+suite entera (~3290 tests, muchas pantallas con `QTableWidget` pesado)
+en un solo proceso, de la misma familia de bug de PySide6/shiboken
+investigada arriba para la planilla, pero a una escala que ya se da
+sin que esta ronda le agregue nada.
+
+## F2 - Planilla: escribir directo en la celda al navegar + "+" como sinónimo de "="
+
+Dos pedidos puntuales de la clienta sobre la planilla flotante:
+
+> "F2 - Planilla * Que al navegar con el cursor se pueda empezar a
+> escribir directamente en la celda * Que al poner '+C2+C3' por
+> ejemplo sea lo mismo que '=C2+C3', que haga la suma de las dos
+> celdas."
+
+### "+" como sinónimo de "=" (motor de fórmulas)
+
+`app/negocio/planilla_flotante.py` suma `_es_formula`/`_expresion_
+formula`: una celda es fórmula si arranca con "=" O con "+" (mismo
+criterio que Excel/Lotus 1-2-3 con el signo "+" — "no quiero que sea
+fórmula" nunca se pidió para "-", así que a propósito NO se suma como
+sinónimo: un número negativo suelto, ej. "-500", sigue siendo una
+nota/número como hasta ahora, no una fórmula). Al evaluar, el "=" se
+descarta (no es un operador válido) pero el "+" se deja tal cual (es
+una suma unaria válida, `eval("+5+3")` da 8 sin tocar nada). `valor_
+celda`/`texto_resultado_celda` usan estos dos helpers en vez de
+chequear `startswith("=")` a mano. Tests nuevos en `tests/test_
+planilla_flotante.py`: `test_valor_celda_mas_al_principio_es_sinonimo_
+de_formula`, `test_valor_celda_mas_solo_tambien_es_formula`, `test_
+valor_celda_menos_al_principio_no_es_formula` (confirma que "-" sigue
+sin ser fórmula), `test_texto_resultado_celda_con_mas_calcula_igual_
+que_con_igual`.
+
+### Escribir directo en la celda al navegar (GUI)
+
+Hasta esta ronda, las celdas de la grilla no tenían `ItemIsEditable` y
+TODA edición pasaba por la barra de fórmula — tipear estando parado en
+una celda (sin haber clickeado antes la barra) no hacía nada útil
+(Qt lo tomaba como búsqueda incremental de ítems, el comportamiento
+default de `QAbstractItemView`). `PlanillaFlotante.eventFilter`
+(`app/gui/widgets/planilla_flotante.py`) suma: cualquier tecla con
+texto imprimible (que no sea Delete/Backspace, ya manejadas) dispara
+`_empezar_a_escribir(texto)` — pone ese texto en la barra de fórmula,
+marca el pendiente (`_marcar_pendiente`) y le pasa el foco a la barra,
+con el cursor al final (`QLineEdit.end(False)`). Mismo comportamiento
+que Excel: tipear sobre una celda ya con contenido lo PISA entero, no
+lo agrega. Solo hace falta interceptar la PRIMERA tecla — una vez que
+el foco está en la barra de fórmula, el resto de lo que se tipee lo
+recibe esa misma `QLineEdit` de forma nativa (`textEdited` ya estaba
+conectado a `_marcar_pendiente` desde el armado original de la
+pantalla). Las celdas en sí siguen sin `ItemIsEditable` — Qt nunca
+abre un editor nativo sobre ellas, la edición de verdad sigue siendo
+siempre la barra de fórmula, solo que ahora se puede arrancar sin
+clickearla primero.
+
+Tests nuevos en `tests/test_gui_widget_planilla_flotante.py`: `test_
+tipear_en_la_tabla_sin_tocar_la_barra_arranca_edicion_en_la_celda`
+(tecla real vía `qtbot.keyClick` sobre la tabla, confirma que el texto
+llega a la barra y que Enter lo confirma en la celda — sin chequear
+`hasFocus()`, frágil bajo Qt offscreen sin la ventana realmente activa;
+alcanza con confirmar que el texto efectivamente llegó y se puede
+confirmar), `test_tipear_en_la_celda_pisa_el_contenido_anterior`,
+`test_tipear_varias_teclas_seguidas_se_siguen_acumulando_en_la_barra`
+(confirma que solo la primera tecla necesita interceptarse).
+
+pyflakes limpio en `app/negocio/planilla_flotante.py` y `app/gui/
+widgets/planilla_flotante.py`. Suite conjunta de `tests/test_planilla_
+flotante.py`/`tests/test_gui_widget_planilla_flotante.py`/`tests/test_
+main_window.py`: 100 passed.
+
+## F2 - Planilla auxiliar: alineación, selección al navegar, apertura maximizada, renombre
+
+Siguiente tanda de pedidos sobre la planilla flotante, en un mismo
+mensaje (dos de los puntos — "+" como fórmula y escribir directo al
+navegar — ya estaban resueltos de la ronda anterior, se confirmaron sin
+tocar nada más):
+
+> "F2 - Planilla * Explicame como hacer una fórmula 'suma' o 'sumar',
+> como para sumar un rango de celdas * Agregame botones para
+> alineaciones, derecha, centro o izquierda * Que por defecto lo que es
+> texto se justifique a la izquierda y los valores a la derecha * Al
+> seleccionar una celda con el mouse ya me tiene que dejar el foco para
+> empezar a escribir, que el texto que este cargado al pinchar se
+> seleccione todo por si quiero volver a escribir arriba y borrar el
+> contenido con ese acto. * Cambiale la etiqueta al menú, en lugar de
+> 'F2 - Planilla' que 'F2 - Planilla auxiliar' * Que la planilla se
+> abra maximizada, y con la planilla activa, si vuelvo a presionar F2
+> que se cierre manteniendo los valores cargados."
+
+### Cómo sumar un rango de celdas (respuesta, no requiere código)
+
+El motor de fórmulas sigue sin funciones tipo `SUMA`/`SUM` — "funciones
+básicas de operaciones aritméticas... no fórmulas complejas" es el
+pedido original. Para sumar un rango hoy hay que escribir cada celda
+sumada con "+", ej. para sumar C2 a C10: `=C2+C3+C4+C5+C6+C7+C8+C9+C10`
+(o con el atajo "+" nuevo de la ronda anterior, arrancando directo con
+"+": `+C2+C3+C4+C5+C6+C7+C8+C9+C10`, mismo resultado). No hay una
+sintaxis de rango (`C2:C10`) — hay que nombrar cada celda.
+
+### Botones de alineación + default automático (texto izquierda, número derecha)
+
+Tres botones nuevos ("Izquierda"/"Centro"/"Derecha", en la misma fila
+que Negrita/Color de texto/Color de relleno/Formato número) aplican un
+override EXPLÍCITO de alineación a la celda/selección actual
+(`_alinear`, `app/gui/widgets/planilla_flotante.py`) — mismo mecanismo
+`_aplicar_a_seleccion` que ya usan negrita/color/formato número.
+
+Sin ese override, `_alineacion_efectiva` decide un default automático:
+mira si la celda resuelve a un número (`valor_celda` de `app.negocio.
+planilla_flotante` — fórmula o número suelto, no `None`) y, si es así,
+alinea a la derecha; si no (texto/nota suelta, vacía, o una fórmula con
+error), a la izquierda. `_estilo_en` (la función que lee el delegate en
+cada repintado) resuelve esto antes de devolver el estilo, así que
+`_DelegadoCelda` nunca ve `None` en `estilo["alineacion"]` — solo
+necesita mapear "izquierda"/"centro"/"derecha" a `Qt.AlignmentFlag` vía
+`option.displayAlignment`.
+
+Persistencia: columna nueva `CeldaPlanilla.Alineacion` (`TEXT`, 
+`NULL` = sin override) — sumada tanto en `schema.sql` (bases nuevas)
+como en `_COLUMNAS_NUEVAS` de `app/db/migraciones.py` (bases ya
+creadas con la tabla vieja, mismo mecanismo que cualquier columna
+nueva sobre una tabla existente). `guardar_celda`/`leer_celdas`
+(`app/negocio/planilla_flotante.py`) suman el parámetro/campo; el
+chequeo de "celda vacía, no hace falta la fila" ahora también exige
+`alineacion is None`.
+
+### Selección al navegar/pinchar una celda (foco + selección de contenido)
+
+Investigado antes de tocar nada: "empezar a escribir al seleccionar
+con el mouse" ya funcionaba sin cambios — el `eventFilter` que
+intercepta la primera tecla imprimible (sumado la ronda anterior) está
+en la TABLA, así que da lo mismo si el foco llegó ahí por teclado o por
+un click del mouse en una celda (Qt le da foco al widget clickeado).
+Lo que faltaba era la segunda parte del pedido: "que el texto que esté
+cargado al pinchar se seleccione todo" — `_cargar_barra_formula`
+(llamada en cada cambio de celda, click o navegación) suma `self.
+barra_formula.selectAll()` después de cargar el contenido. A diferencia
+de `instalar_seleccionar_todo_al_enfocar` (`app/gui/widgets/foco.py`,
+usado en el resto del sistema), no hace falta el `QTimer.singleShot`
+de ese mecanismo: ahí el click que dispara el foco es sobre el MISMO
+widget que hay que seleccionar (Qt reposiciona el cursor después,
+pisando un `selectAll()` inmediato) — acá el click que cambia de celda
+es sobre la TABLA, un widget distinto de la barra de fórmula, así que
+no hay nada que compita por pisar la selección.
+
+### Renombre de la leyenda + apertura maximizada/activa
+
+`self._etiqueta_funciones` (`app/gui/main_window.py`) cambia "F2 –
+Planilla" por "F2 – Planilla auxiliar". `_abrir_calculadora` (el
+método atrás de F2) pasa de `self._planilla.show()` a `self._planilla.
+showMaximized()` + `self._planilla.activateWindow()` en la rama que
+la muestra — "que se abra maximizada, y con la planilla activa". La
+rama que la oculta (F2 con la ventana ya visible) no cambió, y
+tampoco el resto del mecanismo de instancia única (`show()`/`hide()`,
+nunca se destruye) — "si vuelvo a presionar F2 que se cierre
+manteniendo los valores cargados" ya se cumplía sin tocar nada (los
+datos viven en `self._celdas`/SQLite, ajenos a mostrar/ocultar la
+ventana).
+
+Tests nuevos en `tests/test_gui_widget_planilla_flotante.py`: `test_
+cambiar_de_celda_selecciona_todo_el_contenido_de_la_barra`, `test_
+alineacion_por_defecto_texto_izquierda_numero_derecha`, `test_boton_
+de_alineacion_pisa_el_default_y_persiste`, `test_boton_de_alineacion_
+centro_se_aplica_a_toda_la_seleccion`. En `tests/test_planilla_
+flotante.py`: `test_guardar_celda_vacia_pero_con_alineacion_si_deja_
+fila`, más el test de persistencia existente actualizado con
+`alineacion="centro"`. En `tests/test_main_window.py`: `test_
+etiqueta_de_funciones_f1_a_f12` actualizado al nuevo texto, test nuevo
+`test_f2_abre_la_planilla_maximizada_y_activa` (mockea `showMaximized`/
+`activateWindow` de la instancia y confirma que se llaman en ese
+orden al volver a abrir, no en la apertura que la oculta).
+
+pyflakes limpio en `app/db/migraciones.py`, `app/gui/main_window.py`,
+`app/gui/widgets/planilla_flotante.py`, `app/negocio/planilla_
+flotante.py` y los tres archivos de test tocados. Suite conjunta de
+`tests/test_planilla_flotante.py`/`tests/test_gui_widget_planilla_
+flotante.py`/`tests/test_main_window.py`/`tests/test_migraciones.py`:
+150 passed.
+
+## F2 - Planilla auxiliar: F2/ApplicationShortcut, modo señalar, grilla A-Z/1-100, combinar celdas — y un bug de PySide6 más serio que los anteriores
+
+Ronda siguiente, cinco pedidos puntuales sobre la misma pantalla:
+
+> "Con F2 de nuevo con la planilla activa no cierra la pantalla. Fijate
+> si se puede hacer con esa tecla o si no con otra, como con ESC"
+> "Si empiezo a generar una suma o una operación en una celda, quiero
+> que al presionar el cursor me navegue con en excel para otras celdas
+> como para ir generando las operaciones de esa manera, es decir,
+> empiezo a escribir en '+45+' en C1, presiono cursor abajo, ahi
+> quedaría '+45+C2', a medida de que sigo poniendo signos me sigue
+> concatenendo celdas o números."
+> "Columnas hasta la Z, filas hasta la 100"
+> "Agregame un botón de combinar celdas, que es botón también
+> descombine. Que los botones queden en una sola fila, reducí el ancho
+> de los mismos"
+> "La alineación vertical siempre centralizada"
+
+### F2 no cerraba la planilla con ella activa
+
+Investigado antes de tocar nada: `QShortcut` usa por default `Qt.
+ShortcutContext.WindowShortcut` — solo dispara si la ventana DUEÑA del
+atajo (`VentanaPrincipal`, acá `self`) tiene el foco. La planilla es
+otra ventana de nivel superior (`Qt.WindowType.Window`) — en cuanto
+ella pasa a tener el foco (justo lo que pasa al abrirla, "con la
+planilla activa" de la ronda anterior), F2 registrado en
+`VentanaPrincipal` deja de verse, aunque las dos ventanas sean de la
+MISMA aplicación. `self._atajo_calculadora.setContext(Qt.
+ShortcutContext.ApplicationShortcut)` (`app/gui/main_window.py`) lo
+hace disparar sin importar cuál de las dos ventanas esté activa —
+mismo atajo F2, no hizo falta pasar a ESC. Test nuevo en `tests/test_
+main_window.py`: `test_atajo_f2_usa_contexto_de_aplicacion_no_de_
+ventana` (confirma `context() == ApplicationShortcut` directo, en vez
+de simular foco real entre dos ventanas top-level, frágil bajo Qt
+offscreen).
+
+### "Modo señalar" (navegación tipo Excel al armar una fórmula)
+
+Mismo mecanismo que Excel: con el cursor dentro de una fórmula en
+construcción en la barra de fórmula ("=" o "+" al principio), cada
+flecha CONCATENA una referencia de celda en vez de mover el cursor de
+texto. `_mover_puntero_formula`/`_al_tipear_en_formula`
+(`app/gui/widgets/planilla_flotante.py`) distinguen, sin más estado que
+dos pares de atributos nuevos (`_punto_fila`/`_punto_columna`,
+`_puntero_activo`), dos casos sobre el ejemplo de la clienta ("+45+" en
+C1, cursor abajo → "+45+C2", seguir poniendo signos sigue
+concatenando"):
+
+- Flecha tras OTRA flecha (sin tipear nada real en el medio): MUEVE la
+  referencia ya insertada (la reemplaza) — "cursor abajo, cursor abajo"
+  dos veces seguidas desde C1 da "+45+C3", no "+45+C2+C3".
+- Flecha tras tipear algo real (`textEdited` real del usuario, no un
+  `setText` programático de este mismo mecanismo — distinción clave:
+  `textEdited` nunca se dispara con `setText()`): la referencia
+  anterior queda "fijada" y la próxima flecha agrega una referencia
+  NUEVA, partiendo de la última celda señalada (no de la celda que se
+  está editando) — así se puede "caminar" la misma fila/columna de a
+  una celda, sumando signos entre cada una, igual que en Excel.
+
+El `eventFilter` ya existente (intercepta Delete/Backspace y la
+primera tecla imprimible de la tabla) suma: una flecha en la barra de
+fórmula, con el texto actual arrancando en "=" o "+", dispara este
+modo en vez de mover el cursor de texto nativo — sin prefijo de
+fórmula, la flecha se deja pasar sin tocar nada (una nota suelta no
+entra en este modo). Tests nuevos en `tests/test_gui_widget_planilla_
+flotante.py`: `test_flecha_abajo_en_formula_concatena_referencia_de_
+celda` (el ejemplo exacto de la clienta), `test_flechas_consecutivas_
+mueven_la_misma_referencia_en_vez_de_agregar`, `test_tipear_entre_
+flechas_fija_la_referencia_y_agrega_una_nueva`, `test_flecha_sin_
+prefijo_de_formula_no_dispara_el_modo_senalar`.
+
+### Botón combinar/descombinar + una sola fila de botones más angosta
+
+`_combinar_celdas` (nueva): un solo botón que combina o descombina
+según el estado actual de la selección — "un botón de combinar
+celdas, que es botón también descombine" — mira `rowSpan`/`columnSpan`
+de la celda superior-izquierda de la selección con `QTableWidget.
+setSpan(...)` (combinar) o `setSpan(fila, columna, 1, 1)`
+(descombinar, API nativa de Qt para deshacer un span). Sin
+persistencia propia (a diferencia del resto de la planilla, que
+guarda todo en `CeldaPlanilla`) — no se pidió explícitamente guardarlo,
+y la ventana de todos modos nunca se destruye durante la sesión, así
+que sobrevive a mostrar/ocultar con F2 igual; si se cierra TODO el
+sistema, se pierde (se documenta así, sin guardarlo, mismo criterio
+que "a veces se prueba algo y no se lo guarda si no se pidió
+explícitamente").
+
+"Que los botones queden en una sola fila, reducí el ancho de los
+mismos": `ancho_boton = max(QFontMetrics(self.font()).
+horizontalAdvance(b.text()) for b in botones) + 16` (mismo criterio
+de ancho fijo único del resto del sistema, calculado para que entre
+el texto más largo) en vez del ancho automático de cada botón — de
+paso, los textos se acortan ("Color de texto" → "Color texto", "Color
+de relleno" → "Color fondo", "Formato número" → "Formato núm.") para
+que la fila entera entre sin tener que agrandar la ventana. Tests
+nuevos: `test_boton_combinar_combina_la_seleccion`, `test_boton_
+combinar_es_el_mismo_boton_para_combinar_y_descombinar`, `test_sin_
+seleccion_combinar_no_hace_nada`, `test_todos_los_botones_de_estilo_
+tienen_el_mismo_ancho`.
+
+### Alineación vertical siempre centralizada
+
+Ya estaba resuelto sin tocar nada — `_ALINEACION_QT` (los tres valores
+de alineación horizontal) ya incluía `Qt.AlignmentFlag.AlignVCenter`
+en los tres desde que se armó este mecanismo (ronda anterior). Test
+nuevo de todos modos para dejarlo cubierto explícitamente: `test_
+alineacion_vertical_siempre_centralizada`.
+
+### Grilla "columnas hasta la Z, filas hasta la 100" — y un CUARTO bug de PySide6/shiboken, más serio que los tres anteriores
+
+`_COLUMNAS`/`_FILAS` pasan de 12×40 (480 celdas) a 26×100 (2600
+celdas), tal como se pidió. Investigando esto a fondo aparecieron DOS
+hallazgos nuevos de PySide6/shiboken (6.12.0, este sandbox — ver el
+docstring completo de `PlanillaFlotante` para el detalle técnico de
+los cuatro hallazgos, el primero y el segundo ya documentados en
+rondas anteriores):
+
+- **Tercero**: crear los `QTableWidgetItem` de las 2600 celdas de
+  entrada (como hacía la vieja `_refrescar_grilla`, solo para poder
+  apagarles `ItemIsEditable`) ya cruza, por sí solo, el mismo umbral
+  de ~700-1000 ya documentado para mutaciones de texto — confirmado
+  con un script offscreen que crea ítems vacíos sin tocar su texto
+  nunca. **Mitigado**: `self.tabla.setEditTriggers(QAbstractItemView.
+  EditTrigger.NoEditTriggers)` apaga la edición nativa a nivel TABLA
+  en vez de por ítem (confirmado que alcanza igual, ningún editor se
+  abre aunque la celda no tenga ítem propio) — así, `_recalcular_
+  textos` puede crear cada `QTableWidgetItem` de forma PEREZOSA, recién
+  la primera vez que una celda necesita mostrar texto no vacío, en vez
+  de las 2600 de entrada. En el uso real ("anotaciones simples... cada
+  tanto") la enorme mayoría de las celdas nunca llega a necesitar un
+  ítem.
+
+- **Cuarto, sin mitigación posible desde código de la app**: aun con
+  ese fix — CERO ítems creados, instancia recién construida — el mismo
+  abort ("Fatal Python error: none_dealloc") sigue apareciendo en algún
+  punto posterior del mismo proceso, con la grilla en 100×26.
+  Achicado con scripts offscreen que solo construyen un `QTableWidget`
+  liso (sin ítems, sin delegate, sin esta pantalla): con 26 columnas
+  fijas, 65 filas (1690 celdas) nunca rompe, 70 filas (1820 celdas) sí
+  — un umbral FIJO, parecido al de los hallazgos anteriores, pero que
+  depende de la estructura interna fila×columna del propio
+  `QTableWidget`/`QHeaderView` (secciones de encabezado, índices de
+  modelo), no de los ítems que contiene — con una sola columna, en
+  cambio, 1100 filas no rompe, así que tampoco es un simple total
+  filas×columnas. Mismo criterio que el resto de los "Fallos conocidos
+  del sandbox/contenedor" (ver CLAUDE.md): es un bug de la librería, no
+  de esta pantalla, nunca se pierde ningún dato (todo ya quedó en
+  SQLite en cada edición) y no se encontró ninguna mitigación de
+  código que lo elimine sin achicar la grilla por debajo de ese umbral
+  — lo que iría en contra del pedido explícito. Se deja documentado,
+  pendiente de confirmar si el build de PySide6 del entorno real de la
+  clienta (Windows) también lo tiene.
+
+**Impacto en la suite de tests** (no en la app real): corriendo la
+grilla de PRODUCCIÓN (2600 celdas) dentro de una sesión de `pytest`
+— que ya trae su propio "churn" de objetos Qt por los fixtures/qtbot
+de otros tests — el umbral del cuarto hallazgo se cruza mucho antes
+(confirmado: con un `QTableWidget` de 100×26 compartido entre los 24
+tests de `tests/test_gui_widget_planilla_flotante.py`, el abort
+aparecía DETERMINÍSTICAMENTE a mitad de la suite, no solo al cierre
+final del proceso como en los hallazgos anteriores). `tests/
+conftest.py` suma un fixture `autouse`/`scope="session"`
+(`_planilla_flotante_grilla_chica_para_tests`) que achica `_FILAS`/
+`_COLUMNAS` a 15×15 (225 celdas, de sobra para cualquier test — ninguno
+usa más allá de la fila/columna 5) durante TODA la sesión de tests,
+sin tocar los valores de producción (la app real sigue armando la
+grilla completa pedida) — con esto, la suite vuelve a correr sin
+abortar a mitad de camino; el único abort que puede seguir apareciendo
+es el ya documentado "al final, después de imprimirse el resumen
+completo" (ver CLAUDE.md, "Fallos conocidos del sandbox/contenedor"),
+que no afecta el resultado reportado de ningún test.
+
+Tests nuevos: ninguno específico de este hallazgo (es un bug de
+infraestructura de test, no de comportamiento de la pantalla) — se
+confirma indirectamente con el resto de la suite de esta pantalla
+corriendo sin abortar.
+
+### Resumen de verificación
+
+pyflakes limpio en `app/gui/main_window.py`, `app/gui/widgets/
+planilla_flotante.py`, `tests/conftest.py` y los dos archivos de test
+tocados. Suite conjunta de `tests/test_gui_widget_planilla_flotante.
+py`/`tests/test_planilla_flotante.py`/`tests/test_main_window.py`:
+116 passed (más el artefacto ya documentado de fin de proceso, sin
+afectar el resultado de ningún test).
+
+## Base de datos: renombre a `sistemadf.db`
+
+Pedido explícito de la clienta: en vez de esperar un "final" de la
+revisión pantalla por pantalla (que en la práctica no tiene un punto
+de cierre fijo — sigue apareciendo algo nuevo en cada ronda), hacer el
+renombre ahora, con las precauciones correspondientes, en vez de
+dejarlo indefinidamente pendiente.
+
+`DB_PATH_DEFAULT` (`app/db/connection.py`) pasa de `data/espacio_
+ramos.db` a `data/sistemadf.db` — único lugar real del código que fija
+el nombre (`get_connection`/`init_database`/`main.py`/`gui_main.py`
+todos lo toman de esta constante, nunca lo repiten). Se revisó todo el
+repo (`grep` de "espacio_ramos" fuera de `docs/historial/`) antes de
+tocar nada, para no dejar una referencia vieja suelta: aparte de esta
+constante, solo quedaban un mención en `README.md` (actualizada al
+nuevo nombre) y un `assert` en `tests/test_connection.py` que compara
+contra el valor real de la constante (actualizado). El resto de las
+apariciones (`tests/test_backup.py`/`tests/test_instancia_unica.py`)
+son nombres de archivo ARBITRARIOS que esos tests usan para un
+`tmp_path` de prueba — no dependen del nombre real y funcionan igual
+con cualquier nombre, así que se dejan como estaban.
+
+**Importante, de cara al entorno real de la clienta:** este cambio
+es puramente de código — el archivo real `data/espacio_ramos.db` de
+su máquina NO se renombra solo. Sin el paso manual correspondiente,
+al levantar esta versión el programa va a buscar `data/sistemadf.db`,
+no lo va a encontrar, y le va a crear uno nuevo VACÍO con ese nombre
+(mismo mecanismo de `get_connection`/`init_database` que crea la base
+si no existe) — sin perder el archivo viejo, pero sin verlo tampoco.
+Paso a paso que tiene que hacer ella antes de levantar esta versión:
+1. Backup de `data/espacio_ramos.db` (por las dudas, aparte del
+   backup que ya hace el propio sistema).
+2. Renombrar ese archivo a `data/sistemadf.db` (mismo directorio).
+3. Levantar la versión nueva del código normalmente — va a encontrar
+   la base ya renombrada y seguir con todos los datos tal cual estaban.
+
+Tests actualizados: `tests/test_connection.py` (el `assert` contra
+`DB_PATH_DEFAULT`). pyflakes limpio en `app/db/connection.py` y el
+archivo de test. Suite conjunta de `tests/test_connection.py`/`tests/
+test_instancia_unica.py`/`tests/test_backup.py`/`tests/test_
+migraciones.py`: 93 passed.
+
+Aparte, se le confirmó a la clienta que el archivo de bloqueo
+(`espacio_ramos.db.lock`) NO hace falta renombrarlo a mano —
+`BloqueoInstanciaUnica` (`app/negocio/instancia_unica.py`) lo deriva
+siempre del nombre de la base (`db_path.name + ".lock"`), así que en
+cuanto la base quede renombrada y se levante la versión nueva, el
+`.lock` nuevo (`sistemadf.db.lock`) se crea solo. El viejo queda
+huérfano pero inofensivo (es un archivo de control, no de datos) —
+se puede borrar sin problema, no es obligatorio.
+
+## F2 - Planilla auxiliar: botones Copiar/Pegar + fórmula SUMA(rango)
+
+Dos pedidos puntuales de la clienta sobre la planilla flotante:
+
+> "Agregame los botones de copiar y pegar, para copiar celdas o
+> rangos de celdas"
+> "Se puede crear una fórmula sola como para sumar un rango de
+> celdas..?"
+
+### Botones Copiar/Pegar
+
+`_copiar`/`_pegar` (`app/gui/widgets/planilla_flotante.py`), nuevos,
+primeros de la fila de botones (antes de "Negrita"). `_copiar` guarda
+en un portapapeles interno (`self._portapapeles`, una lista nueva —
+NO el portapapeles del sistema operativo, es copiar/pegar DENTRO de
+la planilla) la posición RELATIVA de cada celda de la selección
+actual (o la celda actual, sin selección) dentro del rectángulo
+copiado, junto con su estilo completo (contenido, negrita, colores,
+formato número, alineación — mismo criterio "todo junto" que ya usa
+`_estilo`/`_aplicar_a_seleccion` para el resto de los botones).
+`_pegar` reproduce esa misma forma relativa anclada en la celda
+ACTUAL (la que tenga el foco al apretar "Pegar") — las celdas que
+caerían afuera de la grilla al pegar cerca de un borde se descartan
+sin romper nada.
+
+No ajusta referencias de fórmula al pegar en otra posición (ej.
+"=A1+1" se pega tal cual, no se corre a "=A2+1") — a propósito, mismo
+criterio de "sin fórmulas complejas" del resto del motor; un
+ajuste de referencias relativas al estilo Excel es una pieza bastante
+más grande que lo que se pidió ("copiar celdas o rangos de celdas").
+
+Tests nuevos en `tests/test_gui_widget_planilla_flotante.py`:
+`test_copiar_y_pegar_una_sola_celda`, `test_copiar_y_pegar_copia_
+tambien_el_formato`, `test_copiar_y_pegar_un_rango_mantiene_la_
+forma`, `test_pegar_cerca_del_borde_descarta_las_celdas_que_quedan_
+afuera`, `test_pegar_sin_copiar_antes_no_hace_nada` (portapapeles
+vacío a propósito, en vez de confiar en que ningún test anterior
+sobre la misma instancia compartida haya copiado algo — ver
+`_instancia_compartida`). `test_todos_los_botones_de_estilo_tienen_
+el_mismo_ancho` actualizado para incluir los dos botones nuevos en
+el chequeo de ancho uniforme.
+
+### `SUMA(rango)`: única excepción al motor "sin funciones"
+
+Pedido explícito de la clienta, repitiendo la pregunta de una ronda
+anterior (donde se le explicó que solo se podía sumar nombrando cada
+celda con "+") — esta vez se agrega de verdad. `_PATRON_RANGO`
+(`app/negocio/planilla_flotante.py`) reconoce `SUMA(C2:C10)` (también
+bloques de varias columnas/filas, ej. `SUMA(A1:B10)`, igual que
+Excel) y lo reemplaza por el número ya calculado ANTES de que
+`_PATRON_CELDA` procese el resto de la fórmula — así que
+"=SUMA(C2:C10)+D1" sigue funcionando (el "+D1" lo resuelve el
+mecanismo de siempre). `_indice_columna`/`_letra_desde_indice`/
+`_celdas_en_rango`, nuevas, hacen la conversión letra↔índice de
+columna (base-26 estándar de cualquier planilla) y expanden las dos
+esquinas del rango a la lista de direcciones del rectángulo entre
+ellas (funciona con las esquinas en cualquier orden, ej. "SUMA(C4:C2)"
+suma igual que "SUMA(C2:C4)"). Cada celda del rango pasa por
+`valor_celda` con el mismo `_visitando` de la fórmula que la
+contiene, así que una referencia circular adentro del rango (ej.
+sumar un rango que se incluye a sí misma) se detecta igual que una
+referencia circular suelta — sin código nuevo para eso, reutiliza el
+mecanismo existente. Sigue siendo la ÚNICA función disponible —
+"no fórmulas complejas" sigue siendo el criterio, esto es una
+excepción puntual pedida explícitamente, no una apertura a sumar más
+funciones sin que se pidan.
+
+Tests nuevos en `tests/test_planilla_flotante.py`:
+`test_valor_celda_suma_rango_de_una_columna`, `test_valor_celda_suma_
+rango_rectangular` (bloque de varias filas Y columnas),
+`test_valor_celda_suma_rango_con_mas_sigue_siendo_formula` (combinado
+con el resto de la fórmula), `test_valor_celda_suma_rango_ignora_
+celdas_sin_numero`, `test_valor_celda_suma_rango_con_esquinas_
+invertidas`, `test_valor_celda_suma_rango_detecta_referencia_
+circular`, `test_texto_resultado_celda_suma_rango`.
+
+pyflakes limpio en `app/gui/widgets/planilla_flotante.py`,
+`app/negocio/planilla_flotante.py` y los dos archivos de test
+tocados. Suite conjunta de `tests/test_gui_widget_planilla_flotante.
+py`/`tests/test_planilla_flotante.py`/`tests/test_main_window.py`:
+128 passed (más el artefacto ya documentado de fin de proceso, sin
+afectar el resultado de ningún test).

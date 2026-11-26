@@ -758,3 +758,23 @@ punta: las tres hojas juntas enlazan por Código al mismo `IdLlave`, y
 reimportar toda la planilla deja "Llave" duplicada pero "LlaveAcceso"
 sigue resolviendo el Código contra el Tipo ya existente.
 
+## Llaves: diálogo de carga a profesional — ya estaba resuelto
+
+Pedido: "Cuando se cargue una llave a un profesional que por defecto
+en el cuadro de diálogo el depósito sea 'Depósito abonado (se cobra el
+monto)'." Investigado antes de tocar nada: `_DialogoAsignar.combo_
+deposito` (`app/gui/pantallas/llaves.py`) ya agrega "Depósito abonado
+(se cobra el monto)" como PRIMER ítem (índice 0, el default de todo
+`QComboBox` recién creado) desde una ronda anterior — ya documentado en
+un comentario en el propio código ("pedido explícito posterior de la
+clienta: cuando asigno una llave por defecto que el depósito sea
+Depósito abonado") y cubierto por un test ya existente,
+`test_dialogo_asignar_arranca_en_abonado_con_monto_habilitado`
+(`tests/test_gui_llaves.py`), que sigue pasando tal cual. Lo único que
+puede forzarlo a "Bonificado" es `_al_cambiar_profesional` cuando el
+profesional elegido es categoría B (regla de negocio aparte, confirmada
+por la clienta en su momento: "un profesional B nunca paga depósito").
+No hacía falta ningún cambio de código — este pedido quedaba
+satisfecho por trabajo de una ronda anterior; se cierra solo con la
+verificación.
+

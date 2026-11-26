@@ -4270,6 +4270,149 @@ marca_azul_ese_mes` (noviembre queda azul, diciembre sigue celeste —
 extraordinaria_de_profesional_a_marca_mensaje_generado_queda_azul`.
 pyflakes limpio en `app/gui/pantallas/reservas.py`.
 
+## Reservas aisladas: bug real — dos aisladas superpuestas del MISMO profesional no bloqueaban
+
+Bug real reportado por la clienta: "Tenía una reserva de una
+profesional cargada para el 26-11 de 10 a 11hs. Quise agregar al mismo
+profesional la reserva para ese mismo día en el mismo consultorio de 9
+a 11hs sin recordar que tenía cargada una reserva para ese momento de
+una hora. Me salió el cartel de aviso, pero me creó igual la reserva,
+manteniendo la otra, es decir quedó una de una hora y otra de dos horas
+superponiéndose una hora de ellas. Me tendría que haber bloqueado la
+reserva sin procesar nada."
+
+Investigado en `verificar_conflictos_aislada` (`app/negocio/
+reservas.py`): el conflicto entre dos `ReservaAislada` del mismo
+consultorio/día con horario superpuesto se clasifica `bloqueante` según
+`_relacion_equipo(conn, id_profesional, fila["IdProfesional"])` — y esa
+función devuelve `True` ("relación de equipo", conflicto NO bloqueante,
+solo aviso) tanto para "mismo profesional" como para el par E/su propio
+R. La excepción "mismo profesional" tiene sentido en el OTRO loop de
+esta misma función (aislada contra una `ReservaRegular` — el caso real
+de "reubicación": el profesional se saca a sí mismo de su propio
+horario regular ese día para tomar la aislada en otro lado), pero entre
+dos aisladas ya CONFIRMADAS nunca tiene sentido dejar a un profesional
+doblemente reservado consigo mismo en el mismo horario — ahí es
+exactamente el bug reportado.
+
+Se acota el fix al loop aislada-vs-aislada únicamente (no se tocó
+`verificar_conflictos_regular` ni el loop aislada-vs-regular de la
+misma función, que siguen con su comportamiento de siempre): `mismo_
+profesional = id_profesional == fila["IdProfesional"]`; si es el mismo
+profesional, `bloqueante = True` siempre, sin pasar por `_relacion_
+equipo` — para profesionales DISTINTOS, `_relacion_equipo` sigue
+decidiendo igual que antes (la excepción E/su cabeza R no se toca).
+
+Tests nuevos en `tests/test_reservas.py`:
+`test_reserva_aislada_choca_con_otra_aislada_del_mismo_profesional`
+(reproduce el bug reportado exacto — `ConflictoBloqueanteError`, la
+segunda reserva nunca se crea), `test_reserva_aislada_no_choca_con_
+otra_aislada_del_mismo_profesional_sin_superponerse` (dos aisladas del
+mismo profesional sin superposición real siguen coexistiendo sin
+aviso), `test_reserva_aislada_choca_con_otra_aislada_de_e_y_su_cabeza_
+de_equipo_sigue_siendo_aviso` (confirma que la excepción de equipo
+entre profesionales DISTINTOS no se tocó). pyflakes limpio en
+`reservas.py`. Suite completa de `test_reservas.py`: 77 passed.
+
+## Reservas aisladas: bug real — "Período a imputar" en "Período siguiente" no se respetaba al recalcular la liquidación (caso testigo R51 Laura Garrido)
+
+Bug real reportado por la clienta, con una base real adjunta para
+investigar:
+
+> "Le cargué unas horas aisladas a imputar en el período de 12-2026 y
+> me lo regeneró e incluyó en la liquidación de este mes de noviembre.
+> Te tiro un dato para el bug, creo que me marcó al profesional en
+> verde en el centro de mensajería, y ahi creo que toqué check para
+> que baje a gris, ahi se ve que me regeneró la liquidación pero con
+> ese cargo imputado, esta mal, ese cargo va para la liquidación del
+> próximo mes."
+
+Investigado contra una copia de la base real (`IdProfesional=51`,
+Laura Garrido, R51): tenía una `ReservaAislada` fechada 2026-11-23 con
+`PeriodoImputado='2026-12'` (explícitamente para diciembre). Al marcar
+el check "Enviada" en Centro de mensajería (`_marcar_como_enviada`,
+`app/gui/pantallas/mensajeria.py`), ese handler llama a
+`emitir_liquidacion` para el período noviembre — y la liquidación de
+noviembre SÍ incluyó esa aislada: `MontoGenerado` pasó de $273.282 (la
+emisión anterior, correcta) a $294.202 (la emisión "Enviada" final),
+una diferencia de $20.920 — exactamente el monto de la aislada mal
+imputada (5hs × $4.184/h).
+
+**Causa raíz:** `_aisladas_periodo` (`app/negocio/liquidaciones.py`),
+el motor real que junta las aisladas de "mes anterior"/"mes en curso"
+para `calcular_liquidacion`, filtraba SOLO por la `Fecha` real de la
+reserva (`WHERE ra.Fecha LIKE 'AAAA-MM-%'`) — nunca leía
+`ReservaAislada.PeriodoImputado`. Ese campo existe desde una ronda
+anterior ("En la tabla agregar el campo 'Período imputado'") y el
+combo "Período a imputar" (`app/gui/pantallas/reservas.py`) lo graba
+correctamente al crear la reserva, pero quedaba puramente decorativo
+para el cálculo real — solo se mostraba en la columna de la tabla y
+decidía si `_resolver_periodo_imputar` disparaba una regeneración
+inmediata o esperaba al mes siguiente. Una investigación de una ronda
+anterior (ver más arriba, "Reserva aislada de un mes pasado, imputada
+al siguiente") ya había confirmado esto mismo para el caso de una
+reserva de un mes YA PASADO y lo dejó así a propósito — el análisis de
+esa ronda era correcto para ESE caso puntual (la reserva pasada SIEMPRE
+cae en el bloque "mes anterior" por `Fecha`, coincida o no con el
+período operativo), pero no cubría el caso de Laura Garrido: una
+aislada fechada DENTRO del mes que se está calculando, con "Período a
+imputar" en "Período siguiente" — que es, de hecho, el DEFAULT para
+categoría R/E (`_al_cambiar_profesional`: "Período a imputar" queda
+editable con default "Período siguiente" para R/E) — no tenía ninguna
+protección contra quedar incluida en el mes de su propia fecha si esa
+liquidación se recalculaba después de creada la reserva (como pasó
+acá, vía el check "Enviada").
+
+**Fix:** `_aisladas_periodo` suma el parámetro `periodo_objetivo` (el
+período que `calcular_liquidacion` está armando) y el `WHERE` exige
+`ra.PeriodoImputado IS NULL OR ra.PeriodoImputado = ?` adicional al
+filtro de `Fecha` que ya tenía — una fila con `PeriodoImputado`
+explícito SOLO entra en el cálculo del período que dice ese campo,
+sin importar si su `Fecha` cae en el mes que se está calculando o en
+el anterior; una fila sin `PeriodoImputado` (dato viejo, de antes de
+que existiera la columna) sigue el criterio de siempre, sin ningún
+filtro adicional. Los dos call sites (`aisladas_mes_anterior`/
+`aisladas_mes_en_curso` dentro de `calcular_liquidacion`) pasan
+`periodo` (el período que se está calculando) como ese parámetro
+nuevo.
+
+Confirmado el fix contra la base real adjuntada: `calcular_liquidacion`
+para noviembre pasa de contar la aislada de Laura Garrido ($20.920) a
+no contarla (`total_aisladas_mes_en_curso = 0`), y la cuenta de
+diciembre ahora SÍ la cuenta en su bloque "mes anterior" (coincide con
+`PeriodoImputado='2026-12'`, el período real al que corresponde).
+Verificado también que esto NO rompe el caso ya resuelto de una ronda
+anterior ("reserva de un mes pasado, imputada al siguiente, que
+resuelve al período operativo actual") — una fila con `PeriodoImputado`
+al mes siguiente de su `Fecha` sigue entrando en el bloque "mes
+anterior" DE ESE período siguiente, nunca en el de su propia fecha, y
+una fila con "Período actual" (`PeriodoImputado` = mes de su `Fecha`)
+sigue entrando en "mes en curso" exactamente como antes.
+
+**Pendiente del lado de la clienta:** la liquidación de noviembre de
+Laura Garrido en SU base real ya quedó marcada "Enviada" con el monto
+incorrecto ($294.202, con la aislada de diciembre de más) — ese ajuste
+puntual sobre datos ya emitidos/enviados queda para que ella lo corrija
+a mano en su sistema real (reemitir la liquidación de noviembre ya con
+el fix, revisar si hace falta avisarle algo al profesional) — este
+fix solo corrige el CÁLCULO hacia adelante, no reescribe historial ya
+generado.
+
+Tests nuevos en `tests/test_liquidaciones.py`:
+`test_aislada_imputada_al_periodo_siguiente_no_se_cuenta_en_el_mes_de_
+su_fecha` (reproduce el bug exacto: aislada fechada en agosto con
+`PeriodoImputado='2026-09'` no cuenta en agosto, sí en septiembre
+como "mes anterior"), `test_aislada_imputada_al_periodo_actual_se_
+cuenta_pese_a_la_de_periodo_siguiente` (confirma que "Período actual"
+sigue funcionando igual que siempre, el fix no excluye de más). Los
+dos tests preexistentes que crean una `ReservaAislada` directo por
+repositorio SIN `PeriodoImputado` (`test_aisladas_mes_en_curso_y_mes_
+anterior`, `test_aislada_usa_el_valor_congelado_no_el_vigente_del_
+consultorio`) seguían pasando sin tocarlos — confirman el fallback
+para datos sin esta columna. pyflakes limpio en
+`app/negocio/liquidaciones.py` y el archivo de test. Suite completa
+de `tests/test_liquidaciones.py`: 56 passed.
+
 ## Reservas regulares: no regenerar la liquidación del período actual al crear/eliminar un horario con Vigencia futura
 
 Pedido de la clienta, con una corrección propia a mitad de camino.

@@ -427,3 +427,75 @@ sandbox en Profesionales (ver CLAUDE.md, "Fallos conocidos del
 sandbox/contenedor"), ajeno a esta ronda. pyflakes limpio en `app/pdf/
 liquidacion_pdf.py`, `app/db/migraciones.py`, `app/gui/pantallas/
 profesionales.py` y los dos archivos de test tocados.
+
+## Profesionales: calendario de Fecha de nacimiento arranca en el año 2000
+
+Pedido explícito de la clienta: "que el año arranque en el 2000 para a
+partir de ahí seleccionar la fecha de nacimiento del profesional" — sin
+tocar nada más del campo (sigue mostrando "(sin fecha)" hasta elegir un
+día, sigue vacío/opcional). `Campo` (`app/gui/crud_generico.py`) suma
+`anio_calendario_inicial: int | None`: para un campo `tipo="fecha"` sin
+valor cargado (ni `requerido` ni `default_hoy`), `_crear_entrada` llama
+`entrada.calendarWidget().setCurrentPage(anio, 1)` justo después de
+dejar la fecha en el sentinel "(sin fecha)" — reposiciona la página
+visible del popup del calendario SIN tocar el valor real (confirmado
+con un script puntual: `date()`/`text()` siguen en "(sin fecha)" después
+del `setCurrentPage`). Antes, el popup arrancaba en 1900 (`_FECHA_SIN_
+DATO` de `crud_generico.py`), bastante más lejos de una fecha de
+nacimiento típica que el 2000 pedido. `_campos_profesional`
+(`app/gui/pantallas/profesionales.py`) suma `anio_calendario_
+inicial=2000` al `Campo("FechaNacimiento", ...)` ya existente. Tests
+nuevos en `tests/test_profesionales.py`: `test_fecha_nacimiento_
+calendario_arranca_en_el_anio_2000_en_un_alta_nueva`, `test_fecha_
+nacimiento_ya_cargada_no_salta_al_anio_2000`.
+
+## Profesionales/PDF: checkbox "Ocultar condiciones de Vacaciones/Licencias en el PDF"
+
+Pedido explícito de la clienta, mismo patrón que el checkbox "Ocultar
+hora de liberación" de una ronda anterior:
+
+> "Quisiera agregar un check mas en editar registro de los
+> profesionales, como el que me hiciste antes en ese cuadro que dice
+> 'Ocultar hora de liberación en el PDF', por defecto destildado. Esto
+> es para que me saque de las condiciones que se imprimen en el PDF de
+> las liquidaciones lo que aclara en los puntos referidos a
+> 'Vacaciones' (3), Licencia por maternidad (11), Licencia por
+> matrimonio (12). El resto igual, renumerado desde 1 en adelante sin
+> saltear ningún número, lo único que omite son los puntos que te
+> enumeré recién."
+
+`Profesional` suma la columna `OcultarCondicionesVacacionesLicenciasPdf`
+(booleana, default 0 — mismo mecanismo de `ALTER TABLE ... ADD COLUMN`
+que `OcultarHoraLiberacionPdf`, en `schema.sql` y `_COLUMNAS_NUEVAS`).
+`_campos_profesional` (`app/gui/pantallas/profesionales.py`) suma el
+`Campo` booleano correspondiente, debajo del de "Hora de liberación".
+
+`condiciones_normas` (`app/pdf/valores_pdf.py`) suma el parámetro
+`excluir_vacaciones_licencias: bool = False`: sin marcar, comportamiento
+de siempre (cada punto numerado con su `Numero` real de la base, que
+puede tener huecos si algún punto está inactivo). Marcado, filtra los
+puntos con `Numero` en `{3, 11, 12}` (`_NUMEROS_CONDICIONES_
+VACACIONES_LICENCIAS`, los números reales de "Vacaciones"/"Licencia
+por maternidad"/"Licencia por matrimonio") y renumera el resto de
+manera SECUENCIAL desde 1 — a diferencia del caso sin marcar, que usa
+el `Numero` real tal cual, el caso con exclusión nunca puede mostrar un
+hueco porque ya no tiene sentido mostrar el `Numero` original (quedó
+elegido a propósito para que cierre justo sin un profesional). `generar_
+pdf_liquidacion` (`app/pdf/liquidacion_pdf.py`) le pasa el flag ya
+resuelto desde `profesional["OcultarCondicionesVacacionesLicenciasPdf"]`.
+
+Tests: `tests/test_valores_pdf.py` (+4: sin excluir sigue usando el
+`Numero` real con huecos, excluyendo omite los tres puntos, renumera
+1..18 sin saltear con los 21 sembrados por defecto, el texto de los
+puntos que quedan no cambia). `tests/test_pdf_liquidacion.py` (+2:
+integración end-to-end con/sin el profesional tildado).
+`tests/test_profesionales.py` (+3: mismo trío de tests que "Hora de
+liberación" — arranca destildado, se guarda tildado, precarga tildado
+al editar). Suite conjunta de `test_valores_pdf.py`/`test_pdf_
+liquidacion.py`/`test_profesionales.py`/`test_migraciones.py`: 186
+passed, 1 failed — el fallo es el ya documentado de calibración de
+fuentes del sandbox en Profesionales (ver "Fallos conocidos del
+sandbox/contenedor" más arriba), ajeno a esta ronda. pyflakes limpio
+en `app/pdf/valores_pdf.py`, `app/pdf/liquidacion_pdf.py`, `app/db/
+migraciones.py`, `app/gui/pantallas/profesionales.py` y los tres
+archivos de test tocados.

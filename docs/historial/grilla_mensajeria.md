@@ -918,3 +918,219 @@ fija_al_minimo_sin_cortar_dirigido_a`, `test_tabla_categoria_y_
 descripcion_al_ancho_natural_consul_como_localidad` (reemplaza la del
 +1/3). Suite completa: 38 passed.
 
+## Mensajes predefinidos: variables de depósito/promedio de llaves + orden por Categoría/Descripción + F5 reinicia los 5 selectores de contexto
+
+Tres pedidos puntuales de la clienta:
+
+- Tres variables nuevas, con el mismo criterio de redondeo:
+  `{promedio_valor_llave_edificio}`/`{promedio_valor_llave_unidad}`
+  (promedio del `ValorDepositoActual` de las llaves ACTIVAS de ese
+  Tipo, "redondeando para arriba en múltiplos de 100 sin centavos") y
+  `{deposito_juego_llaves}` (suma de los dos anteriores — "es el valor
+  de la única del edificio mas el promedio del valor de las llaves de
+  las unidades"). `promedio_valor_llave`/`_promedio_redondeado_arriba`/
+  `deposito_juego_llaves` nuevas en `app/negocio/llaves.py`; alcance
+  GLOBAL de todo el espacio, sin distinguir localidad/edificio puntual
+  (mismo criterio que `nombre_espacio`/`nombre_administrador_
+  principal`, las otras variables fijas de esta pantalla). Formato de
+  texto (`$14.000`, sin espacio ni decimales) vía `_moneda_mensaje`
+  nueva en `app/gui/pantallas/mensajes_predefinidos.py` — duplica a
+  propósito `app.negocio.mensajes._moneda` (privada, sin relación de
+  dependencia entre los dos módulos, mismo criterio que `_nombre_
+  espacio`/`_nombre_administrador_principal` ya duplicadas ahí), NO
+  `app.negocio.formato.formatear_moneda` (que usa "$ " con espacio y
+  decimales, formato de tabla/PDF, no de mensaje de texto). La grilla
+  de botones de variables (`_armar_fila_variables`, `crud_generico.py`)
+  ya era genérica en 5 columnas fijas — con las 13 variables totales
+  pasa sola a 3 filas (2 de 5 + una de 3), sin tocar ese mecanismo.
+- "Los mensajes predefinidos que estén ordenados por categoría primero,
+  y luego por descripción": el orden de FILAS por defecto (sin ningún
+  click en un encabezado) dejaba de ser el de inserción/rowid de
+  `self.repositorio.listar()`. Se envuelve esa instancia en
+  `_armar_ui` (mismo criterio ya usado ahí para envolver `self.crud.
+  actualizar`): `self.crud.repositorio.listar` pasa a ordenar siempre
+  por `(Categoria, Descripcion)` antes de que `PantallaCRUD.actualizar`
+  haga lo suyo — `sorted` es estable, así que un click en otra columna
+  (`OrdenTabla`) sigue funcionando normal, este orden de base solo
+  cambia el desempate entre filas iguales en esa columna.
+- "F5 refresca a valores iniciales": `reiniciar()` solo tocaba el
+  filtro de Categoría y la tabla — ahora también resetea los cinco
+  selectores de contexto (Dirigido a, Localidad/Edificio/Unidad/
+  Consultorio) a su valor "En general"/"Nadie en particular" (índice 0).
+  Alertas de éxito ("toda la solapa"): confirmado que Nuevo/Editar/
+  Eliminar YA las mostraban (mecanismo genérico de `PantallaCRUD`, sin
+  ninguna supresión en esta pantalla) — "Copiar mensaje" se deja sin
+  alerta, mismo criterio que TODO el resto del sistema para una copia
+  al portapapeles (Centro de mensajería, Reservas: ningún botón
+  "Copiar"/"Generar texto" muestra cartel).
+
+Tests: `tests/test_llaves.py` (+5: promedio de una sola llave, redondeo
+con valores distintos, sin ninguna llave, ignora inactivas, suma de
+los dos promedios). `tests/test_mensajes_predefinidos.py` (+7: las tres
+variables nuevas sustituidas en la vista previa incluido el redondeo y
+el filtro de inactivas, orden por defecto Categoría+Descripción, F5
+resetea los cinco selectores; 2 tests preexistentes actualizados de
+10 a 13 variables totales, y la grilla de 2x5 a 3 filas de 5 columnas).
+Suite conjunta de `test_llaves.py`/`test_mensajes_predefinidos.py`/
+`test_gui_control_pagos.py`/`test_gui_panel_control.py`/`test_panel_
+control.py`/`test_profesionales.py`/`test_mensajes.py`/`test_
+balance.py`: 399 passed, 1 failed — el fallo es el ya documentado de
+calibración de fuentes del sandbox en Profesionales (ver CLAUDE.md,
+"Fallos conocidos del sandbox/contenedor"), ajeno a esta ronda.
+pyflakes limpio en los seis archivos de app/ tocados (`app/gui/
+pantallas/control_pagos.py`, `app/gui/pantallas/panel_control.py`,
+`app/gui/crud_generico.py`, `app/gui/pantallas/profesionales.py`,
+`app/negocio/llaves.py`, `app/gui/pantallas/mensajes_predefinidos.py`)
+y los cuatro de test.
+
+## Centro de mensajería: bordó primero en el orden, sin condición de reserva regular activa, y reenvío manual sin perder el tipo de mensaje
+
+Tres pedidos de la clienta sobre el mismo color, entregados en tres
+mensajes consecutivos que hay que leer en conjunto (los últimos
+corrigen/afinan a los primeros):
+
+> 1. "Solapa 'Centro de mensajería' * Los profesionales que se ponen en
+>    bordó, el recordatorio cercano a fin de mes, que se pongan arriba
+>    de todo, luego al cliquear el check que se bajen a gris"
+> 2. "Perdón, no al tocar el check, sino al generar el mensaje que se
+>    bajen a gris, no a verde" (corrección al punto 1: el disparador no
+>    es el check de "Enviada", es el botón "Generar texto")
+> 3. "Y también veo profesionales categoría R que estaban en gris y no
+>    en bordó, la idea es que se active el recordatorio en bordó para
+>    todos los profesionales de esa categoría."
+> 4. (misma ronda) "Y una vez que se genera el texto, cuando pasa de
+>    bordó a gris, que sea el mensaje en bordó (actualizado con los
+>    nuevos saldos si hace falta) que se vuelva a generar, no el
+>    mensaje de gris. Si esto genera algún conflicto, el tipo de mensaje
+>    digo, que siga en bordó, pero que el profesional que se pincha en
+>    generar mensaje que baje en la tabla y quede luego de los azules
+>    de las horas aisladas." (la clienta ofrece una alternativa de
+>    respaldo — reordenar en vez de cambiar el mensaje — solo por si la
+>    primera generaba algún problema; no hizo falta, ver abajo)
+
+### Orden: bordó primero de todos (punto 1)
+
+`_ORDEN_COLOR` (`app/gui/pantallas/mensajeria.py`) pasa "bordo" al
+primer lugar de la tupla (antes estaba sobre el final, cerca de
+marrón/gris) — el recordatorio de fin de mes es urgente y tiene que
+verse antes que cualquier otro color.
+
+### Investigado antes de tocar nada: el botón "Generar texto" ya bajaba a gris correctamente (punto 2)
+
+El punto 2 corrige una primera implementación de este mismo pedido:
+arranqué asumiendo que el disparador era el check "Enviada" (como
+decía el mensaje original) y armé un caso especial ahí — la clienta
+interrumpió para aclarar que el disparador real es el botón "Generar
+texto", no el check. Se revirtió ese caso especial antes de que
+llegara a tocar ningún test ni a comitearse.
+
+Investigado con un script offscreen que clickea el botón real
+"Generar texto" de un profesional bordó: ya bajaba a gris
+correctamente, sin ningún cambio de código (`_texto_para_boton`, rama
+`bordo`, ya llamaba a `marcar_recordatorio_mensajeria_generado` tras
+armar el mensaje). Confirmado además por prueba estructural: en
+`color_profesional`, una vez que `EstadoEnvio == "Enviada"` para R, la
+función devuelve bordó o gris DENTRO de ese mismo bloque — nunca puede
+caer al chequeo de "verde" más abajo, así que un salto a verde desde
+bordó (lo que la clienta decía NO querer) era estructuralmente
+imposible con este código. No hacía falta tocar nada acá — el bug real
+que la clienta estaba viendo era el del punto 3.
+
+### Bordó para CUALQUIER profesional R, sin mirar reserva regular (punto 3, el fix real)
+
+`_debe_recordar_fin_de_mes` (`app/negocio/mensajeria.py`) tenía, desde
+la ronda en que se armó por primera vez, una condición extra adentro:
+solo pasaba a bordó un profesional con una `ReservaRegular` vigente a
+la fecha de hoy (`_reserva_regular_activa`, duplicado del helper
+mismo-nombre de `panel_control.py`, sin relación entre los dos
+módulos). Esa condición nunca fue pedida para el caso general — era un
+criterio razonable de la primera vuelta de este pedido, que la clienta
+ahora pide sacar explícitamente: "la idea es que se active el
+recordatorio en bordó para todos los profesionales de esa categoría".
+Se elimina la condición y, de paso, la función `_reserva_regular_
+activa` completa de este módulo (sin otro uso). El resto de las
+condiciones de bordó no cambia: liquidación ya Enviada, dentro de
+`DiasAntesFinMesRecordatorioGeneral` días de fin de mes, recordatorio
+no generado todavía este período.
+
+### Reenvío manual desde un gris que ya fue bordó: mismo mensaje, saldos vigentes (punto 4)
+
+Al generar el texto de un bordó, el profesional pasa a gris para el
+resto del período (mecanismo sin cambios, ver arriba) — pero un gris
+que YA pasó por bordó sigue siendo distinto de un gris que nunca pasó
+por bordó: antes de este pedido, un segundo click en "Generar texto"
+sobre ESE MISMO profesional (ya en gris) generaba el mensaje de envío
+de liquidación (el que usa el resto de los grises/verdes/amarillos/
+violetas), perdiendo el mensaje de recordatorio. La clienta pidió que
+un reenvío manual siga generando el mensaje de recordatorio de fin de
+mes, actualizado con los saldos que tenga el profesional en ese
+momento (no el que tenía la primera vez).
+
+`recordatorio_mensajeria_ya_generado(conn, id_profesional, periodo)`,
+nueva en `app/negocio/mensajeria.py`: lee `EstadoMensajeriaPeriodo.
+RecordatorioMensajeriaGenerado` para ese profesional/período — `True`
+si y solo si ya pasó por bordó alguna vez en este período (el caso
+que importa acá, el que sigue en gris por eso). `_texto_para_boton`
+(`app/gui/pantallas/mensajeria.py`) suma, antes de la rama genérica de
+grises, un caso para `color == "gris" and recordatorio_mensajeria_ya_
+generado(...)`: en ese caso devuelve `mensaje_recordatorio_fin_de_mes`
+de nuevo (la misma función que usa bordó — ya lee los saldos en vivo,
+no hace falta nada especial para que refleje el saldo vigente al
+momento del reenvío) en vez de `mensaje_envio_liquidacion`. Un gris
+que NUNCA pasó por bordó (lejos de fin de mes, o directamente nunca
+tuvo el flag) sigue yendo por la rama de siempre, sin cambios.
+
+No hizo falta la alternativa de respaldo que ofreció la clienta
+(mantener el color en bordó y solo reordenar en la tabla) — distinguir
+el tipo de mensaje por el flag ya existente
+(`RecordatorioMensajeriaGenerado`) resuelve el pedido sin ningún
+conflicto ni tener que tocar `color_profesional`/`_ORDEN_COLOR` de
+nuevo.
+
+Tests nuevos en `tests/test_mensajeria_negocio.py`
+(`test_recordatorio_mensajeria_ya_generado_distingue_gris_que_fue_
+bordo`, `test_recordatorio_mensajeria_ya_generado_falso_para_un_gris_
+que_nunca_fue_bordo`, `test_recordatorio_mensajeria_ya_generado_falso_
+sin_ningun_estado_del_periodo`) y renombrado/invertido
+`test_gris_no_pasa_a_bordo_sin_reserva_regular_activa` ->
+`test_gris_pasa_a_bordo_sin_reserva_regular_activa`. En
+`tests/test_gui_mensajeria.py`:
+`test_generar_texto_reenvio_desde_gris_que_fue_bordo_repite_el_
+mensaje_de_recordatorio` (dos clicks reales en "Generar texto" sobre
+el mismo profesional, cambiando el saldo entre uno y otro, confirma
+que el segundo mensaje sigue siendo el de recordatorio y refleja el
+saldo nuevo).
+
+Suite completa tras esta ronda: pyflakes limpio en todo `app/`/`tests/`.
+`tests/test_mensajeria_negocio.py`/`tests/test_gui_mensajeria.py`: solo
+los 3 fallos ya documentados del reloj real del sandbox cerca de fin de
+mes (ver CLAUDE.md, "Fallos conocidos del sandbox/contenedor") —
+confirmado con `git stash` que reproducen igual sin los cambios de esta
+ronda.
+
+## Mensajes predefinidos: diálogo Nuevo/Editar reducido a 3 columnas de variables
+
+Pedido explícito de la clienta, en un mensaje junto con otros dos
+pedidos sobre Registrar pagos y una planilla flotante nueva (ver
+`docs/historial/pagos.md` y `docs/historial/sistema.md`): "El cuadro de
+diálogo reducilo a lo ancho, que los botones sean en filas de tres para
+que no exceda el ancho de la pantalla, hoy por hoy se sobresale y tengo
+que correr la ventana para poder apretar el botón 'Ok'."
+
+Investigado antes de tocar nada (el pedido original decía "Registrar
+pagos", pero ningún diálogo de esa pantalla tiene más de dos botones —
+aclarado por la clienta tras una pregunta: "me confundí al
+escribirte"): el diálogo que se sale de la pantalla es el de
+Nuevo/Editar de Mensajes predefinidos — `multiplicador_tamano_
+dialogo=2.0` sobre un ancho que ya depende de `_armar_fila_variables`
+(`crud_generico.py`), cuya grilla de botones de variables estaba en 5
+columnas desde una ronda anterior. Con las 13 variables actuales
+(nombres largos, ej. "{promedio_valor_llave_edificio}") esa grilla
+terminaba midiendo lo suficiente para que el diálogo completo saliera
+a ~1800px de ancho — confirmado armando el diálogo real offscreen y
+midiendo `sizeHint().width()` antes/después. `_COLUMNAS_BOTONES_
+VARIABLES` vuelve a 3 (medido offscreen: 1462px, entra en pantalla) —
+ningún otro catálogo usa `variables=` todavía, así que el cambio no
+afecta a nada más. Test renombrado en `test_mensajes_predefinidos.py`
+(`..._grilla_de_3_columnas`, antes "...de_5...").
+

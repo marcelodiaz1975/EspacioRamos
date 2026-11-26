@@ -560,3 +560,68 @@ Tests nuevos en `tests/test_gui_novedades.py`:
 `test_anular_licencia_muestra_alerta_final_de_exito`,
 `test_anular_ausencia_muestra_alerta_final_de_exito`.
 
+## Vacaciones: orden por defecto Año calendario → Desde → Hasta → Código de profesional
+
+Pedido explícito de la clienta: "que la tabla esté ordenada primero por
+'Año calendario' de menor a mayor, luego por 'Desde', luego por
+'Hasta', luego por Código de profesional." `_PanelVacaciones.actualizar`
+(`app/gui/pantallas/novedades.py`) ordenaba antes por código de
+profesional primero y Desde como único desempate — se invierte la
+prioridad completa: la clave de orden pasa a ser `(FechaDesde[:4],
+FechaDesde, FechaHasta, clave_orden_codigo(...))`. "Año calendario" es
+literalmente el año de `FechaDesde` (mismo valor que ya muestra esa
+columna en la tabla, `r["FechaDesde"][:4]`), así que ordenar por
+`FechaDesde` completo ya alcanza para los dos primeros criterios a la
+vez — se deja igual el año explícito como primer elemento de la tupla
+para que la intención quede clara en el código, aunque sea redundante
+hoy. El orden por click en un encabezado (`OrdenTabla`) no se toca —
+sigue aplicándose DESPUÉS como un `sort` estable adicional, este orden
+de base solo cambia el desempate entre filas iguales en esa columna.
+
+Test nuevo en `tests/test_gui_novedades.py`:
+`test_vacaciones_orden_por_defecto_anio_desde_hasta_codigo` — arma dos
+profesionales (R1/R2, insertados a propósito en el orden inverso al que
+tienen que terminar en la tabla) y vacaciones fuera de orden cubriendo
+los cuatro niveles de desempate (años distintos, mismo Desde con Hasta
+distinto, mismo Desde Y Hasta con código distinto). Suite completa de
+`test_gui_novedades.py`: 144 passed.
+
+## Tipos de licencia: un alta nueva no se veía en Licencias sin reiniciar todo el programa
+
+Bug real reportado por la clienta:
+
+> "Cree un nuevo tipo de licencia, y tuve que salir del programa y
+> volver a ingresar para que pueda usar ese concepto para registrar
+> con un profesional."
+
+Investigado antes de tocar nada: `_PanelLicencias.combo_tipo`
+(`app/gui/pantallas/novedades.py`, solapa "Licencias" de "Registro de
+ausencias") armaba el combo "Tipo de licencia" leyendo el catálogo
+`TipoLicencia` UNA sola vez, en `_armar_ui` (al construir la
+pantalla) — a diferencia de `combo_profesional`, que ya tenía su
+propio `_cargar_combo_profesional()` recargado en cada `reiniciar()`
+(volver a entrar a la solapa o F5, ver bug análogo ya resuelto en
+rondas anteriores para Vacaciones/Licencias/Ausencias/Cargos
+especiales). Como `_PanelLicencias` es una instancia única que vive
+toda la sesión (no se reconstruye al cambiar de solapa), un alta nueva
+en el catálogo "Tipos de licencia" (otra pantalla) nunca se reflejaba
+en este combo hasta reiniciar TODO el programa.
+
+`_cargar_combo_tipo()`, nueva, mismo patrón que `_cargar_combo_
+profesional` (`blockSignals` para no disparar `_tipo_cambio` por cada
+ítem agregado al repoblar) — se llama tanto en `_armar_ui` (reemplaza
+el loop inline que armaba el combo una sola vez) como en
+`reiniciar()`, justo antes de `combo_tipo.setCurrentIndex(0)`. Con
+esto, un Tipo de licencia nuevo ya aparece con solo volver a entrar a
+la solapa "Licencias" (o F5) — no hace falta reiniciar el programa.
+
+Test nuevo en `tests/test_gui_novedades.py`:
+`test_licencias_combo_tipo_se_actualiza_al_volver_a_la_solapa` (crea
+un Tipo de licencia nuevo con el panel ya construido, dispara
+`showEvent` y confirma que aparece en el combo) — mismo criterio que
+`test_licencias_combo_profesional_se_actualiza_al_volver_a_la_solapa`,
+ya existente para el caso análogo de profesionales. pyflakes limpio en
+`app/gui/pantallas/novedades.py` y el archivo de test. Suite conjunta
+de `tests/test_gui_novedades.py`/`tests/test_licencias.py`: 158
+passed.
+

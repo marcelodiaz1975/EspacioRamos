@@ -676,3 +676,57 @@ exacto en vez de "lo que mida el contenido actual". Test reescrito:
 `test_tabla_registrar_pagos_monto_saldos_anchas_para_el_formato_
 maximo` (antes comparaba contra el 60% del ancho natural). Suite de
 `test_gui_pagos.py`: 87 passed.
+
+## Redefinición de "Saldo actual"/"Saldo anterior": Registrar pagos sin "Saldo total"
+
+Parte de una redefinición más amplia del modelo de saldos (caso testigo
+Vanesa Moreno, ver `docs/historial/general.md` para el pedido completo
+de la clienta y el fix de fondo en `app/negocio/pagos.py`/
+`saldo_actual_mostrado`) — acá solo la parte que toca esta pantalla.
+
+El formulario de carga (`_actualizar_saldos`, `app/gui/pantallas/
+pagos.py`) pasa a mostrar solo DOS saldos (pedido explícito de la
+clienta): "Saldo anterior" (campo crudo) y "Saldo actual" (combinado,
+vía `saldo_actual_mostrado`) — se saca la etiqueta "Saldo total" de una
+ronda anterior (quedaba redundante, ya lo muestra "Saldo actual") y
+"Nuevo saldo" se calcula sumándole el monto cargado directamente a
+"Saldo actual", sin ningún total intermedio. El orden/ancho de columnas
+de la tabla de movimientos ("Saldo previo"/"Nuevo saldo" justo después
+de "Monto") ya estaba resuelto de una ronda anterior (#79/#82) — nada
+que tocar ahí, y esas dos columnas YA guardaban el combinado (ver
+`registrar_pago`), así que ya cumplían ese punto del pedido sin cambiar
+nada.
+
+Tests: ver `docs/historial/general.md` para la lista completa de la
+ronda (toca `tests/test_gui_pagos.py`, `tests/test_pagos.py` y varios
+archivos más).
+
+## Registrar pagos: agradecimiento por transferencia al portapapeles
+
+Pedido explícito de la clienta, en un mensaje junto con otros dos
+pedidos sobre Mensajes predefinidos y una planilla flotante nueva (ver
+`docs/historial/grilla_mensajeria.md` y `docs/historial/sistema.md`):
+
+> "Solapa 'Registrar pagos' * Quiero que cuando se procese un pago por
+> transferencia a cualquier cuenta, al terminar me deje cargado un
+> texto en el portapapeles que diga lo siguiente: Muchas gracias
+> {apodo} 😊 Seguimos en contacto por cualquier cosa, saludos..! * Ese
+> texto dejalo dentro de los textos de sistema"
+
+`mensaje_agradecimiento_transferencia(conn, id_profesional)`, nueva en
+`app/negocio/mensajes.py`: usa `nombre_para_mensaje` (misma cadena de
+fallback Apodo→NombrePila→Tratamiento+Apellido de todo el módulo) y la
+plantilla editable `mensaje_agradecimiento_transferencia`
+(`DEFAULT_AGRADECIMIENTO_TRANSFERENCIA`, nueva en
+`plantillas_texto.py`, sumada a `MENSAJES_EDITABLES` — aparece en
+Textos del sistema). Sin restricción de categoría, a diferencia del
+resto de los mensajes de `mensajes.py` (todos acotados a R) — este
+agradecimiento aplica a cualquier profesional que pague por
+transferencia. `_registrar` (`app/gui/pantallas/pagos.py`) copia este
+texto al portapapeles cuando `es_transferencia` (flag ya existente),
+después de la línea que ya copiaba el detalle de una aislada — a
+propósito la pisa, el agradecimiento es lo último que importa tras
+cobrar una transferencia.
+
+pyflakes limpio en `app/gui/pantallas/pagos.py`, `app/negocio/
+mensajes.py`, `app/negocio/plantillas_texto.py`.
