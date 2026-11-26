@@ -427,6 +427,22 @@ def test_f2_abre_la_planilla_maximizada_y_activa(qtbot, conn, monkeypatch):
     assert llamadas == ["maximizar", "activar"]
 
 
+def test_atajo_f2_usa_contexto_de_aplicacion_no_de_ventana(qtbot, conn):
+    """Bug real reportado por la clienta: "con F2 de nuevo con la
+    planilla activa no cierra la pantalla". Causa: `QShortcut` por
+    default usa `WindowShortcut` (solo dispara si la ventana DUEÑA del
+    atajo tiene el foco) — una vez que la planilla (otra ventana de
+    nivel superior) pasa a tener el foco, F2 registrado en
+    `VentanaPrincipal` deja de verse. No se simula el foco real entre
+    dos ventanas top-level bajo Qt offscreen (frágil, poco confiable) —
+    se confirma directamente que el atajo quedó configurado con
+    `ApplicationShortcut`, que dispara sin importar qué ventana de la
+    MISMA aplicación esté activa."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    assert ventana._atajo_calculadora.context() == Qt.ShortcutContext.ApplicationShortcut
+
+
 def test_panel_mas_interno_baja_por_tabwidgets_anidados(qtbot, conn):
     from PySide6.QtWidgets import QTabWidget
 

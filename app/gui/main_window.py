@@ -209,6 +209,15 @@ class VentanaPrincipal(QMainWindow):
         self._planilla: PlanillaFlotante | None = None
         self._atajo_calculadora = QShortcut(Qt.Key.Key_F2, self)
         self._atajo_calculadora.activated.connect(self._abrir_calculadora)
+        # Bug real reportado por la clienta: "con F2 de nuevo con la
+        # planilla activa no cierra la pantalla" — `QShortcut` por
+        # default usa `WindowShortcut` (solo dispara si la ventana
+        # DUEÑA del atajo, acá `self`, tiene el foco), y la planilla es
+        # otra ventana de nivel superior (`Qt.WindowType.Window`) — una
+        # vez que ella tiene el foco, F2 registrado en `self` deja de
+        # verse. `ApplicationShortcut` lo hace disparar sin importar
+        # qué ventana de la MISMA aplicación esté activa.
+        self._atajo_calculadora.setContext(Qt.ShortcutContext.ApplicationShortcut)
 
         self._atajo_regulares = QShortcut(Qt.Key.Key_F3, self)
         self._atajo_regulares.activated.connect(lambda: self.ir_a_solapa("Reservas", "Reservas regulares"))

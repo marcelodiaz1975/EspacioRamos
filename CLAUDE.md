@@ -1926,3 +1926,189 @@ flotante.py` y los tres archivos de test tocados. Suite conjunta de
 `tests/test_planilla_flotante.py`/`tests/test_gui_widget_planilla_
 flotante.py`/`tests/test_main_window.py`/`tests/test_migraciones.py`:
 150 passed.
+
+## F2 - Planilla auxiliar: F2/ApplicationShortcut, modo señalar, grilla A-Z/1-100, combinar celdas — y un bug de PySide6 más serio que los anteriores
+
+Ronda siguiente, cinco pedidos puntuales sobre la misma pantalla:
+
+> "Con F2 de nuevo con la planilla activa no cierra la pantalla. Fijate
+> si se puede hacer con esa tecla o si no con otra, como con ESC"
+> "Si empiezo a generar una suma o una operación en una celda, quiero
+> que al presionar el cursor me navegue con en excel para otras celdas
+> como para ir generando las operaciones de esa manera, es decir,
+> empiezo a escribir en '+45+' en C1, presiono cursor abajo, ahi
+> quedaría '+45+C2', a medida de que sigo poniendo signos me sigue
+> concatenendo celdas o números."
+> "Columnas hasta la Z, filas hasta la 100"
+> "Agregame un botón de combinar celdas, que es botón también
+> descombine. Que los botones queden en una sola fila, reducí el ancho
+> de los mismos"
+> "La alineación vertical siempre centralizada"
+
+### F2 no cerraba la planilla con ella activa
+
+Investigado antes de tocar nada: `QShortcut` usa por default `Qt.
+ShortcutContext.WindowShortcut` — solo dispara si la ventana DUEÑA del
+atajo (`VentanaPrincipal`, acá `self`) tiene el foco. La planilla es
+otra ventana de nivel superior (`Qt.WindowType.Window`) — en cuanto
+ella pasa a tener el foco (justo lo que pasa al abrirla, "con la
+planilla activa" de la ronda anterior), F2 registrado en
+`VentanaPrincipal` deja de verse, aunque las dos ventanas sean de la
+MISMA aplicación. `self._atajo_calculadora.setContext(Qt.
+ShortcutContext.ApplicationShortcut)` (`app/gui/main_window.py`) lo
+hace disparar sin importar cuál de las dos ventanas esté activa —
+mismo atajo F2, no hizo falta pasar a ESC. Test nuevo en `tests/test_
+main_window.py`: `test_atajo_f2_usa_contexto_de_aplicacion_no_de_
+ventana` (confirma `context() == ApplicationShortcut` directo, en vez
+de simular foco real entre dos ventanas top-level, frágil bajo Qt
+offscreen).
+
+### "Modo señalar" (navegación tipo Excel al armar una fórmula)
+
+Mismo mecanismo que Excel: con el cursor dentro de una fórmula en
+construcción en la barra de fórmula ("=" o "+" al principio), cada
+flecha CONCATENA una referencia de celda en vez de mover el cursor de
+texto. `_mover_puntero_formula`/`_al_tipear_en_formula`
+(`app/gui/widgets/planilla_flotante.py`) distinguen, sin más estado que
+dos pares de atributos nuevos (`_punto_fila`/`_punto_columna`,
+`_puntero_activo`), dos casos sobre el ejemplo de la clienta ("+45+" en
+C1, cursor abajo → "+45+C2", seguir poniendo signos sigue
+concatenando"):
+
+- Flecha tras OTRA flecha (sin tipear nada real en el medio): MUEVE la
+  referencia ya insertada (la reemplaza) — "cursor abajo, cursor abajo"
+  dos veces seguidas desde C1 da "+45+C3", no "+45+C2+C3".
+- Flecha tras tipear algo real (`textEdited` real del usuario, no un
+  `setText` programático de este mismo mecanismo — distinción clave:
+  `textEdited` nunca se dispara con `setText()`): la referencia
+  anterior queda "fijada" y la próxima flecha agrega una referencia
+  NUEVA, partiendo de la última celda señalada (no de la celda que se
+  está editando) — así se puede "caminar" la misma fila/columna de a
+  una celda, sumando signos entre cada una, igual que en Excel.
+
+El `eventFilter` ya existente (intercepta Delete/Backspace y la
+primera tecla imprimible de la tabla) suma: una flecha en la barra de
+fórmula, con el texto actual arrancando en "=" o "+", dispara este
+modo en vez de mover el cursor de texto nativo — sin prefijo de
+fórmula, la flecha se deja pasar sin tocar nada (una nota suelta no
+entra en este modo). Tests nuevos en `tests/test_gui_widget_planilla_
+flotante.py`: `test_flecha_abajo_en_formula_concatena_referencia_de_
+celda` (el ejemplo exacto de la clienta), `test_flechas_consecutivas_
+mueven_la_misma_referencia_en_vez_de_agregar`, `test_tipear_entre_
+flechas_fija_la_referencia_y_agrega_una_nueva`, `test_flecha_sin_
+prefijo_de_formula_no_dispara_el_modo_senalar`.
+
+### Botón combinar/descombinar + una sola fila de botones más angosta
+
+`_combinar_celdas` (nueva): un solo botón que combina o descombina
+según el estado actual de la selección — "un botón de combinar
+celdas, que es botón también descombine" — mira `rowSpan`/`columnSpan`
+de la celda superior-izquierda de la selección con `QTableWidget.
+setSpan(...)` (combinar) o `setSpan(fila, columna, 1, 1)`
+(descombinar, API nativa de Qt para deshacer un span). Sin
+persistencia propia (a diferencia del resto de la planilla, que
+guarda todo en `CeldaPlanilla`) — no se pidió explícitamente guardarlo,
+y la ventana de todos modos nunca se destruye durante la sesión, así
+que sobrevive a mostrar/ocultar con F2 igual; si se cierra TODO el
+sistema, se pierde (se documenta así, sin guardarlo, mismo criterio
+que "a veces se prueba algo y no se lo guarda si no se pidió
+explícitamente").
+
+"Que los botones queden en una sola fila, reducí el ancho de los
+mismos": `ancho_boton = max(QFontMetrics(self.font()).
+horizontalAdvance(b.text()) for b in botones) + 16` (mismo criterio
+de ancho fijo único del resto del sistema, calculado para que entre
+el texto más largo) en vez del ancho automático de cada botón — de
+paso, los textos se acortan ("Color de texto" → "Color texto", "Color
+de relleno" → "Color fondo", "Formato número" → "Formato núm.") para
+que la fila entera entre sin tener que agrandar la ventana. Tests
+nuevos: `test_boton_combinar_combina_la_seleccion`, `test_boton_
+combinar_es_el_mismo_boton_para_combinar_y_descombinar`, `test_sin_
+seleccion_combinar_no_hace_nada`, `test_todos_los_botones_de_estilo_
+tienen_el_mismo_ancho`.
+
+### Alineación vertical siempre centralizada
+
+Ya estaba resuelto sin tocar nada — `_ALINEACION_QT` (los tres valores
+de alineación horizontal) ya incluía `Qt.AlignmentFlag.AlignVCenter`
+en los tres desde que se armó este mecanismo (ronda anterior). Test
+nuevo de todos modos para dejarlo cubierto explícitamente: `test_
+alineacion_vertical_siempre_centralizada`.
+
+### Grilla "columnas hasta la Z, filas hasta la 100" — y un CUARTO bug de PySide6/shiboken, más serio que los tres anteriores
+
+`_COLUMNAS`/`_FILAS` pasan de 12×40 (480 celdas) a 26×100 (2600
+celdas), tal como se pidió. Investigando esto a fondo aparecieron DOS
+hallazgos nuevos de PySide6/shiboken (6.12.0, este sandbox — ver el
+docstring completo de `PlanillaFlotante` para el detalle técnico de
+los cuatro hallazgos, el primero y el segundo ya documentados en
+rondas anteriores):
+
+- **Tercero**: crear los `QTableWidgetItem` de las 2600 celdas de
+  entrada (como hacía la vieja `_refrescar_grilla`, solo para poder
+  apagarles `ItemIsEditable`) ya cruza, por sí solo, el mismo umbral
+  de ~700-1000 ya documentado para mutaciones de texto — confirmado
+  con un script offscreen que crea ítems vacíos sin tocar su texto
+  nunca. **Mitigado**: `self.tabla.setEditTriggers(QAbstractItemView.
+  EditTrigger.NoEditTriggers)` apaga la edición nativa a nivel TABLA
+  en vez de por ítem (confirmado que alcanza igual, ningún editor se
+  abre aunque la celda no tenga ítem propio) — así, `_recalcular_
+  textos` puede crear cada `QTableWidgetItem` de forma PEREZOSA, recién
+  la primera vez que una celda necesita mostrar texto no vacío, en vez
+  de las 2600 de entrada. En el uso real ("anotaciones simples... cada
+  tanto") la enorme mayoría de las celdas nunca llega a necesitar un
+  ítem.
+
+- **Cuarto, sin mitigación posible desde código de la app**: aun con
+  ese fix — CERO ítems creados, instancia recién construida — el mismo
+  abort ("Fatal Python error: none_dealloc") sigue apareciendo en algún
+  punto posterior del mismo proceso, con la grilla en 100×26.
+  Achicado con scripts offscreen que solo construyen un `QTableWidget`
+  liso (sin ítems, sin delegate, sin esta pantalla): con 26 columnas
+  fijas, 65 filas (1690 celdas) nunca rompe, 70 filas (1820 celdas) sí
+  — un umbral FIJO, parecido al de los hallazgos anteriores, pero que
+  depende de la estructura interna fila×columna del propio
+  `QTableWidget`/`QHeaderView` (secciones de encabezado, índices de
+  modelo), no de los ítems que contiene — con una sola columna, en
+  cambio, 1100 filas no rompe, así que tampoco es un simple total
+  filas×columnas. Mismo criterio que el resto de los "Fallos conocidos
+  del sandbox/contenedor": es un bug de la librería, no de esta
+  pantalla, nunca se pierde ningún dato (todo ya quedó en SQLite en
+  cada edición) y no se encontró ninguna mitigación de código que lo
+  elimine sin achicar la grilla por debajo de ese umbral — lo que iría
+  en contra del pedido explícito. Se deja documentado, pendiente de
+  confirmar si el build de PySide6 del entorno real de la clienta
+  (Windows) también lo tiene.
+
+**Impacto en la suite de tests** (no en la app real): corriendo la
+grilla de PRODUCCIÓN (2600 celdas) dentro de una sesión de `pytest`
+— que ya trae su propio "churn" de objetos Qt por los fixtures/qtbot
+de otros tests — el umbral del cuarto hallazgo se cruza mucho antes
+(confirmado: con un `QTableWidget` de 100×26 compartido entre los 24
+tests de `tests/test_gui_widget_planilla_flotante.py`, el abort
+aparecía DETERMINÍSTICAMENTE a mitad de la suite, no solo al cierre
+final del proceso como en los hallazgos anteriores). `tests/
+conftest.py` suma un fixture `autouse`/`scope="session"`
+(`_planilla_flotante_grilla_chica_para_tests`) que achica `_FILAS`/
+`_COLUMNAS` a 15×15 (225 celdas, de sobra para cualquier test — ninguno
+usa más allá de la fila/columna 5) durante TODA la sesión de tests,
+sin tocar los valores de producción (la app real sigue armando la
+grilla completa pedida) — con esto, la suite vuelve a correr sin
+abortar a mitad de camino; el único abort que puede seguir apareciendo
+es el ya documentado "al final, después de imprimirse el resumen
+completo" (ver "Fallos conocidos del sandbox/contenedor" más abajo),
+que no afecta el resultado reportado de ningún test.
+
+Tests nuevos: ninguno específico de este hallazgo (es un bug de
+infraestructura de test, no de comportamiento de la pantalla) — se
+confirma indirectamente con el resto de la suite de esta pantalla
+corriendo sin abortar.
+
+### Resumen de verificación
+
+pyflakes limpio en `app/gui/main_window.py`, `app/gui/widgets/
+planilla_flotante.py`, `tests/conftest.py` y los dos archivos de test
+tocados. Suite conjunta de `tests/test_gui_widget_planilla_flotante.
+py`/`tests/test_planilla_flotante.py`/`tests/test_main_window.py`:
+116 passed (más el artefacto ya documentado de fin de proceso, sin
+afectar el resultado de ningún test).

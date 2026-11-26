@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QColorDialog, QMessageBox, QTableWidgetSelectionRa
 
 from app.db.init_db import init_database
 from app.db.seed import sembrar_valores_por_defecto
-from app.gui.widgets.planilla_flotante import PlanillaFlotante
+from app.gui.widgets.planilla_flotante import _ALINEACION_QT, PlanillaFlotante
 from app.negocio.planilla_flotante import leer_celdas
 
 
@@ -42,6 +42,11 @@ def planilla(_instancia_compartida, conn):
     p._celdas = leer_celdas(conn)
     p._texto_pendiente = None
     p._recalcular_textos()
+    # `_combinar_celdas` (sin persistencia propia, ver su docstring)
+    # puede dejar un span de un test anterior sobre la misma instancia
+    # compartida — se vuelve a (0, 0) sin combinar para que los tests
+    # de combinar/descombinar no dependan del orden en que corren.
+    p.tabla.setSpan(0, 0, 1, 1)
     # `setCurrentCell(0, 0)` no dispara `currentCellChanged` si la celda
     # actual (de un test anterior, sobre la misma instancia compartida)
     # ya era (0, 0) — se fija el estado a mano para no depender de la
@@ -63,7 +68,10 @@ def _escribir(planilla, fila, columna, texto):
 
 
 def test_arranca_vacia_sin_nada_guardado(planilla):
-    assert planilla.tabla.item(0, 0).text() == ""
+    # Celda nunca escrita: no tiene `QTableWidgetItem` propio (creación
+    # perezosa, ver `_recalcular_textos`) — vacía es "sin ítem", no un
+    # ítem con texto vacío.
+    assert planilla.tabla.item(0, 0) is None
     assert planilla.etiqueta_celda.text() == "A1"
 
 
@@ -266,3 +274,102 @@ def test_cerrar_con_la_cruz_solo_esconde_no_destruye(planilla):
     assert not planilla.isVisible()
     # Sigue siendo el mismo objeto Qt vivo, no uno destruido por Qt.
     assert planilla.tabla.rowCount() > 0
+
+
+# --------------------------------------------------- "modo señalar" (navegación tipo Excel)
+
+def test_flecha_abajo_en_formula_concatena_referencia_de_celda(planilla, qtbot):
+    """Pedido explícito, con su propio ejemplo: "empiezo a escribir en
+    '+45+' en C1, presiono cursor abajo, ahí quedaría '+45+C2'"."""
+    planilla.tabla.setCurrentCell(0, 2)  # C1
+    planilla.barra_formula.setText("+45+")
+    planilla._marcar_pendiente("+45+")
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_Down)
+    assert planilla.barra_formula.text() == "+45+C2"
+
+
+def test_flechas_consecutivas_mueven_la_misma_referencia_en_vez_de_agregar(planilla, qtbot):
+    """Sin tipear nada entre una flecha y la siguiente, la referencia ya
+    insertada se MUEVE (no se agrega una nueva) — "a medida que sigo
+    poniendo signos me sigue concatenando celdas"."""
+    planilla.tabla.setCurrentCell(0, 2)  # C1
+    planilla.barra_formula.setText("+45+")
+    planilla._marcar_pendiente("+45+")
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_Down)
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_Down)
+    assert planilla.barra_formula.text() == "+45+C3"  # no "+45+C2+C3"
+
+
+def test_tipear_entre_flechas_fija_la_referencia_y_agrega_una_nueva(planilla, qtbot):
+    """Tipear algo real entre dos flechas "fija" la referencia anterior
+    — la próxima flecha agrega una referencia NUEVA en vez de mover la
+    última."""
+    planilla.tabla.setCurrentCell(0, 2)  # C1
+    planilla.barra_formula.setText("+45+")
+    planilla._marcar_pendiente("+45+")
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_Down)  # "+45+C2"
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_Plus)  # tipeo real: fija C2
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_Down)  # nueva referencia desde C2
+    assert planilla.barra_formula.text() == "+45+C2+C3"
+
+
+def test_flecha_sin_prefijo_de_formula_no_dispara_el_modo_senalar(planilla, qtbot):
+    """Una flecha en la barra de fórmula solo entra en "modo señalar" si
+    el texto ya es una fórmula ("=" o "+") — de lo contrario el cursor
+    de texto se mueve de forma nativa, sin tocar el contenido."""
+    planilla.tabla.setCurrentCell(0, 0)
+    planilla.barra_formula.setText("hola")
+    planilla._marcar_pendiente("hola")
+    qtbot.keyClick(planilla.barra_formula, Qt.Key.Key_Down)
+    assert planilla.barra_formula.text() == "hola"
+
+
+# ------------------------------------------------------------------- combinar/descombinar
+
+def test_boton_combinar_combina_la_seleccion(planilla):
+    planilla.tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 1), True)
+    planilla._combinar_celdas()
+    assert planilla.tabla.rowSpan(0, 0) == 2
+    assert planilla.tabla.columnSpan(0, 0) == 2
+
+
+def test_boton_combinar_es_el_mismo_boton_para_combinar_y_descombinar(planilla):
+    """Pedido explícito: "un botón de combinar celdas, que es botón
+    también descombine"."""
+    planilla.tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 1), True)
+    planilla._combinar_celdas()
+    assert planilla.tabla.rowSpan(0, 0) == 2
+
+    planilla.tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 1, 1), True)
+    planilla._combinar_celdas()
+    assert planilla.tabla.rowSpan(0, 0) == 1
+    assert planilla.tabla.columnSpan(0, 0) == 1
+
+
+def test_sin_seleccion_combinar_no_hace_nada(planilla):
+    planilla.tabla.clearSelection()
+    planilla._combinar_celdas()  # no debe romper sin ninguna celda seleccionada
+
+
+# ------------------------------------------------------------------------ ancho de botones
+
+def test_todos_los_botones_de_estilo_tienen_el_mismo_ancho(planilla):
+    """Pedido explícito: "que los botones queden en una sola fila,
+    reducí el ancho de los mismos" — mismo criterio del resto del
+    sistema, ancho fijo único para todos."""
+    botones = (
+        planilla.boton_negrita, planilla.boton_color_texto, planilla.boton_color_fondo,
+        planilla.boton_formato_numero, planilla.boton_alinear_izquierda, planilla.boton_alinear_centro,
+        planilla.boton_alinear_derecha, planilla.boton_combinar, planilla.boton_vaciar_todo,
+    )
+    anchos = {b.width() for b in botones}
+    assert len(anchos) == 1
+
+
+# ------------------------------------------------------------------------------- alineación
+
+def test_alineacion_vertical_siempre_centralizada(planilla):
+    """Pedido explícito: "la alineación vertical siempre
+    centralizada" — sin importar la alineación horizontal elegida."""
+    for alineacion in ("izquierda", "centro", "derecha"):
+        assert _ALINEACION_QT[alineacion] & Qt.AlignmentFlag.AlignVCenter
