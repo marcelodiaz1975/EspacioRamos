@@ -200,7 +200,7 @@ class VentanaPrincipal(QMainWindow):
         # `_reiniciar_solapa_activa` sigue siendo el mismo). El orden es
         # el que pidió la clienta, no alfabético ni por categoría de menú.
         self._etiqueta_funciones = QLabel(
-            "F1 – Ayuda / F2 – Planilla / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
+            "F1 – Ayuda / F2 – Planilla auxiliar / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
             "F6 – Grilla / F7 – Mensajería / F8 – Predefinidos / F9 – Oferta / F10 – Profesionales / "
             "F11 – Pagos / F12 – Panel de control"
         )
@@ -292,17 +292,24 @@ class VentanaPrincipal(QMainWindow):
         de la calculadora... una especie de planilla de Excel flotante" —
         reemplaza a la vieja `Calculadora`, ver `PlanillaFlotante`): la
         pone en pantalla la primera vez, la saca si se vuelve a apretar
-        mientras ya está visible. A diferencia de la vieja calculadora,
-        la instancia NUNCA se destruye (bug de PySide6/shiboken al crear
-        y destruir repetidas veces un `QTableWidget` de muchas celdas,
-        ver el docstring de `PlanillaFlotante`) — se crea una sola vez y
-        de ahí en más solo se oculta/muestra."""
+        mientras ya está visible — "si vuelvo a presionar F2 que se
+        cierre manteniendo los valores cargados" (se cumple solo, nunca
+        se destruye ni se vacían sus datos, ver abajo). A diferencia de
+        la vieja calculadora, la instancia NUNCA se destruye (bug de
+        PySide6/shiboken al crear y destruir repetidas veces un
+        `QTableWidget` de muchas celdas, ver el docstring de
+        `PlanillaFlotante`) — se crea una sola vez y de ahí en más solo
+        se oculta/muestra. Pedido explícito: "que la planilla se abra
+        maximizada, y con la planilla activa" — `showMaximized()` en
+        vez de `show()`, más `activateWindow()` para que el teclado
+        quede listo sobre ella sin un click extra."""
         if self._planilla is None:
             self._planilla = PlanillaFlotante(self.conn, self)
         if self._planilla.isVisible():
             self._planilla.hide()
         else:
-            self._planilla.show()
+            self._planilla.showMaximized()
+            self._planilla.activateWindow()
 
     def _panel_mas_interno(self) -> QWidget | None:
         """Baja por la cadena de `QTabWidget` anidados hasta el panel de

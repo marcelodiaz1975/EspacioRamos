@@ -970,5 +970,6 @@ CREATE TABLE IF NOT EXISTS CeldaPlanilla (
     Negrita INTEGER NOT NULL DEFAULT 0,
     ColorTexto TEXT,
     ColorFondo TEXT,
-    FormatoNumero INTEGER NOT NULL DEFAULT 0
+    FormatoNumero INTEGER NOT NULL DEFAULT 0,
+    Alineacion TEXT
 );

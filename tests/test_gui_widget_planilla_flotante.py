@@ -207,6 +207,44 @@ def test_cambiar_de_celda_carga_la_barra_de_formula_con_lo_guardado(planilla):
     assert planilla.barra_formula.text() == "=1+1"
 
 
+def test_cambiar_de_celda_selecciona_todo_el_contenido_de_la_barra(planilla):
+    """Pedido explícito: "que el texto que esté cargado al pinchar se
+    seleccione todo por si quiero volver a escribir arriba y borrar el
+    contenido con ese acto"."""
+    _escribir(planilla, 0, 0, "hola")
+    planilla.tabla.setCurrentCell(1, 1)
+    planilla.tabla.setCurrentCell(0, 0)
+    assert planilla.barra_formula.selectedText() == "hola"
+
+
+def test_alineacion_por_defecto_texto_izquierda_numero_derecha(planilla):
+    """Pedido explícito: "que por defecto lo que es texto se justifique
+    a la izquierda y los valores a la derecha"."""
+    _escribir(planilla, 0, 0, "una nota")
+    _escribir(planilla, 0, 1, "123")
+    _escribir(planilla, 0, 2, "=1+1")
+    assert planilla._estilo_en(0, 0)["alineacion"] == "izquierda"
+    assert planilla._estilo_en(0, 1)["alineacion"] == "derecha"
+    assert planilla._estilo_en(0, 2)["alineacion"] == "derecha"
+
+
+def test_boton_de_alineacion_pisa_el_default_y_persiste(planilla, conn):
+    _escribir(planilla, 0, 0, "123")  # numérico, default "derecha"
+    planilla.tabla.setCurrentCell(0, 0)
+    planilla._alinear("izquierda")
+    assert planilla._estilo_en(0, 0)["alineacion"] == "izquierda"
+    assert leer_celdas(conn)["A1"]["alineacion"] == "izquierda"
+
+
+def test_boton_de_alineacion_centro_se_aplica_a_toda_la_seleccion(planilla):
+    _escribir(planilla, 0, 0, "1")
+    _escribir(planilla, 0, 1, "2")
+    planilla.tabla.setRangeSelected(QTableWidgetSelectionRange(0, 0, 0, 1), True)
+    planilla._alinear("centro")
+    assert planilla._estilo_en(0, 0)["alineacion"] == "centro"
+    assert planilla._estilo_en(0, 1)["alineacion"] == "centro"
+
+
 def test_contenido_cargado_al_construir_desde_lo_ya_guardado(planilla, conn):
     """"Que se conserven" (pedido explícito, persistencia permanente) —
     una instancia nueva arranca leyendo lo que ya había en la base, no en

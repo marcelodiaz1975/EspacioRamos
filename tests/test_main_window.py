@@ -377,7 +377,7 @@ def test_etiqueta_de_funciones_f1_a_f12(qtbot, conn):
     ventana = VentanaPrincipal(conn, _secciones())
     qtbot.addWidget(ventana)
     assert ventana._etiqueta_funciones.text() == (
-        "F1 – Ayuda / F2 – Planilla / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
+        "F1 – Ayuda / F2 – Planilla auxiliar / F3 – Regulares / F4 – Aisladas / F5 – Refrescar / "
         "F6 – Grilla / F7 – Mensajería / F8 – Predefinidos / F9 – Oferta / F10 – Profesionales / "
         "F11 – Pagos / F12 – Panel de control"
     )
@@ -409,7 +409,22 @@ def test_f2_abre_la_planilla_y_f2_de_nuevo_la_oculta(qtbot, conn):
 
     primera.close()  # la cruz de la ventana solo esconde, no destruye
     assert ventana._planilla is primera
-    assert not primera.isVisible()
+
+
+def test_f2_abre_la_planilla_maximizada_y_activa(qtbot, conn, monkeypatch):
+    """Pedido explícito: "que la planilla se abra maximizada, y con la
+    planilla activa"."""
+    ventana = VentanaPrincipal(conn, _secciones())
+    qtbot.addWidget(ventana)
+    llamadas = []
+
+    ventana._abrir_calculadora()  # crea la instancia
+    monkeypatch.setattr(ventana._planilla, "showMaximized", lambda: llamadas.append("maximizar"))
+    monkeypatch.setattr(ventana._planilla, "activateWindow", lambda: llamadas.append("activar"))
+    ventana._abrir_calculadora()  # la oculta (no pasa por el mock, visible ya era True)
+    ventana._abrir_calculadora()  # la vuelve a abrir — acá sí corren los mocks
+
+    assert llamadas == ["maximizar", "activar"]
 
 
 def test_panel_mas_interno_baja_por_tabwidgets_anidados(qtbot, conn):

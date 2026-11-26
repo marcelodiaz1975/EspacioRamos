@@ -155,13 +155,19 @@ def test_leer_celdas_sin_nada_guardado_devuelve_vacio(conn):
 def test_guardar_y_leer_celda_con_contenido_y_estilo(conn):
     guardar_celda(
         conn, "A1", contenido="=1+1", negrita=True, color_texto="#ff0000", color_fondo="#ffff00",
-        formato_numero=True,
+        formato_numero=True, alineacion="centro",
     )
     celdas = leer_celdas(conn)
     assert celdas["A1"] == {
         "contenido": "=1+1", "negrita": True, "color_texto": "#ff0000", "color_fondo": "#ffff00",
-        "formato_numero": True,
+        "formato_numero": True, "alineacion": "centro",
     }
+
+
+def test_guardar_celda_vacia_pero_con_alineacion_si_deja_fila(conn):
+    guardar_celda(conn, "A1", contenido="", alineacion="derecha")
+    celdas = leer_celdas(conn)
+    assert celdas["A1"]["alineacion"] == "derecha"
 
 
 def test_guardar_celda_vacia_sin_estilo_no_deja_fila(conn):

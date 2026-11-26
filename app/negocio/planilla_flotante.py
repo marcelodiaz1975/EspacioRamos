@@ -122,7 +122,7 @@ def formatear_miles(valor: float) -> str:
 
 def leer_celdas(conn: sqlite3.Connection) -> dict[str, dict]:
     filas = conn.execute(
-        "SELECT IdCelda, Contenido, Negrita, ColorTexto, ColorFondo, FormatoNumero FROM CeldaPlanilla"
+        "SELECT IdCelda, Contenido, Negrita, ColorTexto, ColorFondo, FormatoNumero, Alineacion FROM CeldaPlanilla"
     ).fetchall()
     return {
         f["IdCelda"]: {
@@ -131,6 +131,7 @@ def leer_celdas(conn: sqlite3.Connection) -> dict[str, dict]:
             "color_texto": f["ColorTexto"],
             "color_fondo": f["ColorFondo"],
             "formato_numero": bool(f["FormatoNumero"]),
+            "alineacion": f["Alineacion"],
         }
         for f in filas
     }
@@ -139,24 +140,32 @@ def leer_celdas(conn: sqlite3.Connection) -> dict[str, dict]:
 def guardar_celda(
     conn: sqlite3.Connection, id_celda: str, *, contenido: str = "", negrita: bool = False,
     color_texto: str | None = None, color_fondo: str | None = None, formato_numero: bool = False,
+    alineacion: str | None = None,
 ) -> None:
     """Sin contenido ni ningún estilo propio, la celda no necesita fila
     (ver docstring del módulo) — se borra en vez de guardar una fila en
     blanco, mismo criterio que `plantillas_texto.guardar_texto_
-    personalizado`."""
-    vacia = not contenido and not negrita and color_texto is None and color_fondo is None and not formato_numero
+    personalizado`. `alineacion` es "izquierda"/"centro"/"derecha" o
+    `None` (sin override — la GUI decide un default según si la celda
+    resuelve a un número o no, ver `app.gui.widgets.planilla_flotante`)."""
+    vacia = (
+        not contenido and not negrita and color_texto is None and color_fondo is None
+        and not formato_numero and alineacion is None
+    )
     if vacia:
         conn.execute("DELETE FROM CeldaPlanilla WHERE IdCelda = ?", (id_celda,))
     else:
         conn.execute(
             """
-            INSERT INTO CeldaPlanilla (IdCelda, Contenido, Negrita, ColorTexto, ColorFondo, FormatoNumero)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO CeldaPlanilla
+                (IdCelda, Contenido, Negrita, ColorTexto, ColorFondo, FormatoNumero, Alineacion)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(IdCelda) DO UPDATE SET
                 Contenido = excluded.Contenido, Negrita = excluded.Negrita, ColorTexto = excluded.ColorTexto,
-                ColorFondo = excluded.ColorFondo, FormatoNumero = excluded.FormatoNumero
+                ColorFondo = excluded.ColorFondo, FormatoNumero = excluded.FormatoNumero,
+                Alineacion = excluded.Alineacion
             """,
-            (id_celda, contenido, int(negrita), color_texto, color_fondo, int(formato_numero)),
+            (id_celda, contenido, int(negrita), color_texto, color_fondo, int(formato_numero), alineacion),
         )
     conn.commit()
 

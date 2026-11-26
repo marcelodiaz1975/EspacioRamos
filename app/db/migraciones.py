@@ -104,6 +104,7 @@ _COLUMNAS_NUEVAS: list[tuple[str, str, str]] = [
     ("ReservaAislada", "ValorHoraAlMomentoDeLaReserva", "REAL"),
     ("Profesional", "OcultarHoraLiberacionPdf", "INTEGER NOT NULL DEFAULT 0"),
     ("Profesional", "OcultarCondicionesVacacionesLicenciasPdf", "INTEGER NOT NULL DEFAULT 0"),
+    ("CeldaPlanilla", "Alineacion", "TEXT"),
 ]
 
 # (tabla, columna) que existían en versiones anteriores y se dieron de baja

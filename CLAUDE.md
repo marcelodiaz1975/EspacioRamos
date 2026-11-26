@@ -1817,3 +1817,112 @@ pyflakes limpio en `app/negocio/planilla_flotante.py` y `app/gui/
 widgets/planilla_flotante.py`. Suite conjunta de `tests/test_planilla_
 flotante.py`/`tests/test_gui_widget_planilla_flotante.py`/`tests/test_
 main_window.py`: 100 passed.
+
+## F2 - Planilla auxiliar: alineación, selección al navegar, apertura maximizada, renombre
+
+Siguiente tanda de pedidos sobre la planilla flotante, en un mismo
+mensaje (dos de los puntos — "+" como fórmula y escribir directo al
+navegar — ya estaban resueltos de la ronda anterior, se confirmaron sin
+tocar nada más):
+
+> "F2 - Planilla * Explicame como hacer una fórmula 'suma' o 'sumar',
+> como para sumar un rango de celdas * Agregame botones para
+> alineaciones, derecha, centro o izquierda * Que por defecto lo que es
+> texto se justifique a la izquierda y los valores a la derecha * Al
+> seleccionar una celda con el mouse ya me tiene que dejar el foco para
+> empezar a escribir, que el texto que este cargado al pinchar se
+> seleccione todo por si quiero volver a escribir arriba y borrar el
+> contenido con ese acto. * Cambiale la etiqueta al menú, en lugar de
+> 'F2 - Planilla' que 'F2 - Planilla auxiliar' * Que la planilla se
+> abra maximizada, y con la planilla activa, si vuelvo a presionar F2
+> que se cierre manteniendo los valores cargados."
+
+### Cómo sumar un rango de celdas (respuesta, no requiere código)
+
+El motor de fórmulas sigue sin funciones tipo `SUMA`/`SUM` — "funciones
+básicas de operaciones aritméticas... no fórmulas complejas" es el
+pedido original. Para sumar un rango hoy hay que escribir cada celda
+sumada con "+", ej. para sumar C2 a C10: `=C2+C3+C4+C5+C6+C7+C8+C9+C10`
+(o con el atajo "+" nuevo de la ronda anterior, arrancando directo con
+"+": `+C2+C3+C4+C5+C6+C7+C8+C9+C10`, mismo resultado). No hay una
+sintaxis de rango (`C2:C10`) — hay que nombrar cada celda.
+
+### Botones de alineación + default automático (texto izquierda, número derecha)
+
+Tres botones nuevos ("Izquierda"/"Centro"/"Derecha", en la misma fila
+que Negrita/Color de texto/Color de relleno/Formato número) aplican un
+override EXPLÍCITO de alineación a la celda/selección actual
+(`_alinear`, `app/gui/widgets/planilla_flotante.py`) — mismo mecanismo
+`_aplicar_a_seleccion` que ya usan negrita/color/formato número.
+
+Sin ese override, `_alineacion_efectiva` decide un default automático:
+mira si la celda resuelve a un número (`valor_celda` de `app.negocio.
+planilla_flotante` — fórmula o número suelto, no `None`) y, si es así,
+alinea a la derecha; si no (texto/nota suelta, vacía, o una fórmula con
+error), a la izquierda. `_estilo_en` (la función que lee el delegate en
+cada repintado) resuelve esto antes de devolver el estilo, así que
+`_DelegadoCelda` nunca ve `None` en `estilo["alineacion"]` — solo
+necesita mapear "izquierda"/"centro"/"derecha" a `Qt.AlignmentFlag` vía
+`option.displayAlignment`.
+
+Persistencia: columna nueva `CeldaPlanilla.Alineacion` (`TEXT`, 
+`NULL` = sin override) — sumada tanto en `schema.sql` (bases nuevas)
+como en `_COLUMNAS_NUEVAS` de `app/db/migraciones.py` (bases ya
+creadas con la tabla vieja, mismo mecanismo que cualquier columna
+nueva sobre una tabla existente). `guardar_celda`/`leer_celdas`
+(`app/negocio/planilla_flotante.py`) suman el parámetro/campo; el
+chequeo de "celda vacía, no hace falta la fila" ahora también exige
+`alineacion is None`.
+
+### Selección al navegar/pinchar una celda (foco + selección de contenido)
+
+Investigado antes de tocar nada: "empezar a escribir al seleccionar
+con el mouse" ya funcionaba sin cambios — el `eventFilter` que
+intercepta la primera tecla imprimible (sumado la ronda anterior) está
+en la TABLA, así que da lo mismo si el foco llegó ahí por teclado o por
+un click del mouse en una celda (Qt le da foco al widget clickeado).
+Lo que faltaba era la segunda parte del pedido: "que el texto que esté
+cargado al pinchar se seleccione todo" — `_cargar_barra_formula`
+(llamada en cada cambio de celda, click o navegación) suma `self.
+barra_formula.selectAll()` después de cargar el contenido. A diferencia
+de `instalar_seleccionar_todo_al_enfocar` (`app/gui/widgets/foco.py`,
+usado en el resto del sistema), no hace falta el `QTimer.singleShot`
+de ese mecanismo: ahí el click que dispara el foco es sobre el MISMO
+widget que hay que seleccionar (Qt reposiciona el cursor después,
+pisando un `selectAll()` inmediato) — acá el click que cambia de celda
+es sobre la TABLA, un widget distinto de la barra de fórmula, así que
+no hay nada que compita por pisar la selección.
+
+### Renombre de la leyenda + apertura maximizada/activa
+
+`self._etiqueta_funciones` (`app/gui/main_window.py`) cambia "F2 –
+Planilla" por "F2 – Planilla auxiliar". `_abrir_calculadora` (el
+método atrás de F2) pasa de `self._planilla.show()` a `self._planilla.
+showMaximized()` + `self._planilla.activateWindow()` en la rama que
+la muestra — "que se abra maximizada, y con la planilla activa". La
+rama que la oculta (F2 con la ventana ya visible) no cambió, y
+tampoco el resto del mecanismo de instancia única (`show()`/`hide()`,
+nunca se destruye) — "si vuelvo a presionar F2 que se cierre
+manteniendo los valores cargados" ya se cumplía sin tocar nada (los
+datos viven en `self._celdas`/SQLite, ajenos a mostrar/ocultar la
+ventana).
+
+Tests nuevos en `tests/test_gui_widget_planilla_flotante.py`: `test_
+cambiar_de_celda_selecciona_todo_el_contenido_de_la_barra`, `test_
+alineacion_por_defecto_texto_izquierda_numero_derecha`, `test_boton_
+de_alineacion_pisa_el_default_y_persiste`, `test_boton_de_alineacion_
+centro_se_aplica_a_toda_la_seleccion`. En `tests/test_planilla_
+flotante.py`: `test_guardar_celda_vacia_pero_con_alineacion_si_deja_
+fila`, más el test de persistencia existente actualizado con
+`alineacion="centro"`. En `tests/test_main_window.py`: `test_
+etiqueta_de_funciones_f1_a_f12` actualizado al nuevo texto, test nuevo
+`test_f2_abre_la_planilla_maximizada_y_activa` (mockea `showMaximized`/
+`activateWindow` de la instancia y confirma que se llaman en ese
+orden al volver a abrir, no en la apertura que la oculta).
+
+pyflakes limpio en `app/db/migraciones.py`, `app/gui/main_window.py`,
+`app/gui/widgets/planilla_flotante.py`, `app/negocio/planilla_
+flotante.py` y los tres archivos de test tocados. Suite conjunta de
+`tests/test_planilla_flotante.py`/`tests/test_gui_widget_planilla_
+flotante.py`/`tests/test_main_window.py`/`tests/test_migraciones.py`:
+150 passed.

@@ -93,7 +93,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.negocio.planilla_flotante import (
-    formatear_miles, guardar_celda, leer_celdas, texto_resultado_celda, vaciar_todo,
+    ErrorFormula, formatear_miles, guardar_celda, leer_celdas, texto_resultado_celda, valor_celda, vaciar_todo,
 )
 
 _COLUMNAS = 12
@@ -110,13 +110,23 @@ def _id_celda(fila: int, columna: int) -> str:
 
 _ESTILO_VACIO = {
     "contenido": "", "negrita": False, "color_texto": None, "color_fondo": None, "formato_numero": False,
+    "alineacion": None,
+}
+
+_ALINEACION_QT = {
+    "izquierda": Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+    "centro": Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignVCenter,
+    "derecha": Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
 }
 
 
 class _DelegadoCelda(QStyledItemDelegate):
-    """Pinta negrita/color de texto/color de relleno leyendo `obtener_
-    estilo(fila, columna)` en cada repintado — ver el docstring del
-    módulo para por qué no se guarda nada de esto en el ítem/modelo."""
+    """Pinta negrita/color de texto/color de relleno/alineación leyendo
+    `obtener_estilo(fila, columna)` en cada repintado — ver el
+    docstring del módulo para por qué no se guarda nada de esto en el
+    ítem/modelo. `estilo["alineacion"]` ya viene resuelta (override
+    explícito o el default automático — ver `PlanillaFlotante._
+    alineacion_efectiva`), nunca `None` acá."""
 
     def __init__(self, obtener_estilo, parent=None):
         super().__init__(parent)
@@ -133,6 +143,7 @@ class _DelegadoCelda(QStyledItemDelegate):
             option.palette.setColor(QPalette.ColorRole.HighlightedText, color)
         if estilo["color_fondo"]:
             option.backgroundBrush = QColor(estilo["color_fondo"])
+        option.displayAlignment = _ALINEACION_QT[estilo["alineacion"]]
 
 
 class PlanillaFlotante(QWidget):
@@ -171,11 +182,18 @@ class PlanillaFlotante(QWidget):
         self.boton_formato_numero = QPushButton("Formato número")
         self.boton_formato_numero.setCheckable(True)
         self.boton_formato_numero.clicked.connect(self._alternar_formato_numero)
+        self.boton_alinear_izquierda = QPushButton("Izquierda")
+        self.boton_alinear_izquierda.clicked.connect(lambda: self._alinear("izquierda"))
+        self.boton_alinear_centro = QPushButton("Centro")
+        self.boton_alinear_centro.clicked.connect(lambda: self._alinear("centro"))
+        self.boton_alinear_derecha = QPushButton("Derecha")
+        self.boton_alinear_derecha.clicked.connect(lambda: self._alinear("derecha"))
         self.boton_vaciar_todo = QPushButton("Vaciar todo")
         self.boton_vaciar_todo.clicked.connect(self._vaciar_todo)
         for boton in (
             self.boton_negrita, self.boton_color_texto, self.boton_color_fondo,
-            self.boton_formato_numero, self.boton_vaciar_todo,
+            self.boton_formato_numero, self.boton_alinear_izquierda, self.boton_alinear_centro,
+            self.boton_alinear_derecha, self.boton_vaciar_todo,
         ):
             fila_estilos.addWidget(boton)
         layout.addLayout(fila_estilos)
@@ -245,8 +263,26 @@ class PlanillaFlotante(QWidget):
 
     def _estilo_en(self, fila: int, columna: int) -> dict:
         """Usada por `_DelegadoCelda` — misma info que `_estilo`, por
-        fila/columna en vez de dirección (lo que trae `index`)."""
-        return self._estilo(_id_celda(fila, columna))
+        fila/columna en vez de dirección (lo que trae `index`), con la
+        alineación ya resuelta a un valor concreto (nunca `None`)."""
+        id_celda = _id_celda(fila, columna)
+        estilo = dict(self._estilo(id_celda))
+        estilo["alineacion"] = self._alineacion_efectiva(id_celda, estilo["alineacion"])
+        return estilo
+
+    def _alineacion_efectiva(self, id_celda: str, alineacion_guardada: str | None) -> str:
+        """Pedido explícito de la clienta: "que por defecto lo que es
+        texto se justifique a la izquierda y los valores a la derecha"
+        — sin un override explícito (botones de alineación), se decide
+        mirando si la celda resuelve a un número (fórmula o no) o no."""
+        if alineacion_guardada is not None:
+            return alineacion_guardada
+        contenidos = {id_: datos["contenido"] for id_, datos in self._celdas.items()}
+        try:
+            es_numerica = valor_celda(contenidos, id_celda) is not None
+        except ErrorFormula:
+            es_numerica = False
+        return "derecha" if es_numerica else "izquierda"
 
     def _celdas_seleccionadas(self) -> list[str]:
         indices = {(idx.row(), idx.column()) for idx in self.tabla.selectedIndexes()}
@@ -289,6 +325,16 @@ class PlanillaFlotante(QWidget):
         estilo = self._estilo(id_celda)
         self.etiqueta_celda.setText(id_celda)
         self.barra_formula.setText(estilo["contenido"])
+        # Pedido explícito: "que el texto que esté cargado al pinchar se
+        # seleccione todo por si quiero volver a escribir arriba y
+        # borrar el contenido con ese acto" — mismo criterio que
+        # `instalar_seleccionar_todo_al_enfocar` (app/gui/widgets/
+        # foco.py) pero sin su `QTimer.singleShot`: ahí hace falta
+        # porque el click que dispara el foco es sobre el MISMO widget
+        # que hay que seleccionar (Qt reposiciona el cursor después);
+        # acá el click que cambia de celda es sobre la TABLA, un widget
+        # distinto, así que no hay nada que pise esta selección después.
+        self.barra_formula.selectAll()
         self.boton_negrita.setChecked(estilo["negrita"])
         self.boton_formato_numero.setChecked(estilo["formato_numero"])
 
@@ -312,6 +358,7 @@ class PlanillaFlotante(QWidget):
         vacia = (
             not estilo["contenido"] and not estilo["negrita"] and estilo["color_texto"] is None
             and estilo["color_fondo"] is None and not estilo["formato_numero"]
+            and estilo["alineacion"] is None
         )
         if vacia:
             self._celdas.pop(id_celda, None)
@@ -320,7 +367,7 @@ class PlanillaFlotante(QWidget):
         guardar_celda(
             self.conn, id_celda, contenido=estilo["contenido"], negrita=estilo["negrita"],
             color_texto=estilo["color_texto"], color_fondo=estilo["color_fondo"],
-            formato_numero=estilo["formato_numero"],
+            formato_numero=estilo["formato_numero"], alineacion=estilo["alineacion"],
         )
 
     def _aplicar_a_seleccion(self, mutador) -> None:
@@ -389,6 +436,12 @@ class PlanillaFlotante(QWidget):
     def _alternar_formato_numero(self) -> None:
         nuevo = self.boton_formato_numero.isChecked()
         self._aplicar_a_seleccion(lambda estilo: estilo.__setitem__("formato_numero", nuevo))
+
+    def _alinear(self, alineacion: str) -> None:
+        """Pedido explícito: botones de alineación — fijan un override
+        explícito ("izquierda"/"centro"/"derecha") que pisa el default
+        automático de `_alineacion_efectiva` para la celda/selección."""
+        self._aplicar_a_seleccion(lambda estilo: estilo.__setitem__("alineacion", alineacion))
 
     def _borrar_contenido_seleccion(self) -> None:
         self._aplicar_a_seleccion(lambda estilo: estilo.__setitem__("contenido", ""))
